@@ -1,0 +1,317 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Signal Hunter</title>
+<style>
+:root{--bg:#f4f6f9;--card:#fff;--ink:#16202c;--mute:#5f6b7a;--line:#dfe4ea;--soft:#f8fafc;
+--brand:#1f3a5f;--brand2:#2e5c8a;--on:#eef5fc;--hot:#c2410c;--hotbg:#ffedd5;--warm:#a16207;
+--warmbg:#fef9c3;--cold:#475569;--coldbg:#e2e8f0;--new:#15803d;--newbg:#dcfce7;
+--small:#6d28d9;--smallbg:#ede9fe;--chip:#eef2f7;--err:#b91c1c}
+@media (prefers-color-scheme:dark){:root{--bg:#0f1720;--card:#16212d;--ink:#e6edf3;--mute:#9aa7b4;
+--line:#2a3a4a;--soft:#1b2836;--brand:#3d6fa8;--brand2:#7fb0e6;--on:#1c2d40;--hotbg:#4a2412;
+--hot:#fdba8c;--warmbg:#3f3510;--warm:#fde68a;--coldbg:#26313d;--cold:#cbd5e1;--newbg:#123d24;
+--new:#86efac;--smallbg:#2e2350;--small:#c4b5fd;--chip:#223142;--err:#f87171}}
+*{box-sizing:border-box}body{margin:0;font:15px/1.5 "Segoe UI",system-ui,sans-serif;
+background:var(--bg);color:var(--ink)}
+header{background:#1f3a5f;color:#fff;padding:14px 20px;display:flex;align-items:center;
+justify-content:space-between;gap:10px;flex-wrap:wrap}
+header h1{margin:0;font-size:19px}header p{margin:2px 0 0;opacity:.8;font-size:13px}
+.hbtns{display:flex;gap:8px;flex-wrap:wrap}
+.hbtn{background:transparent;color:#fff;border:1px solid rgba(255,255,255,.7);padding:7px 12px}
+main{max-width:1150px;margin:0 auto;padding:18px 16px 60px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;
+margin-bottom:16px}
+.card h2{margin:0 0 12px;font-size:16px;display:flex;align-items:center;gap:10px}
+.step{display:inline-grid;place-items:center;width:24px;height:24px;border-radius:50%;
+background:var(--brand);color:#fff;font-size:13px;flex:none}
+.tabs{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px}
+.tab{background:var(--card);border:2px solid var(--line);border-radius:12px;padding:14px;
+cursor:pointer;text-align:left;color:var(--ink);font-weight:400}
+.tab b{display:block;font-size:16px;margin-bottom:2px;color:var(--brand2)}
+.tab.on{border-color:var(--brand2);background:var(--on)}
+#drop{border:2px dashed #9fb3c8;border-radius:10px;padding:26px 16px;text-align:center;
+cursor:pointer;background:var(--soft)}
+#drop.over{border-color:var(--brand2)}#drop b{color:var(--brand2)}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px}
+input[type=text],select,textarea{font:inherit;padding:8px 10px;border:1px solid var(--line);
+border-radius:8px;background:var(--card);color:var(--ink);min-width:0;max-width:100%}
+textarea{width:100%;min-height:54px}
+button{font:inherit;font-weight:600;border:0;border-radius:8px;padding:9px 16px;cursor:pointer;
+background:var(--brand);color:#fff}
+button.ghost,a.ghost{background:var(--card);color:var(--brand2);border:1px solid var(--brand2);
+text-decoration:none;font-weight:600;border-radius:8px;padding:8px 14px;display:inline-block}
+button:disabled{opacity:.45;cursor:not-allowed}.big{font-size:16px;padding:12px 24px}
+.muted{color:var(--mute);font-size:13px}.err{color:var(--err);font-weight:600}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px}
+label.f{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--mute)}
+table{width:100%;border-collapse:collapse;font-size:13.5px}
+th,td{text-align:left;padding:8px;border-bottom:1px solid var(--line);vertical-align:top}
+th{color:var(--mute);font-weight:600;font-size:12px;text-transform:uppercase}
+.scroll{overflow-x:auto}
+.pill{font-weight:700;font-size:12px;padding:2px 8px;border-radius:999px;white-space:nowrap;
+display:inline-block}
+.HOT{background:var(--hotbg);color:var(--hot)}.WARM{background:var(--warmbg);color:var(--warm)}
+.COLD{background:var(--coldbg);color:var(--cold)}.NEW{background:var(--newbg);color:var(--new)}
+.SMALL{background:var(--smallbg);color:var(--small)}
+.need{display:inline-block;font-size:12px;background:var(--chip);border-radius:6px;
+padding:1px 7px;margin:0 4px 4px 0}
+.bar{height:10px;background:var(--line);border-radius:99px;overflow:hidden}
+.bar>div{height:100%;background:var(--brand2);width:0;transition:width .3s}
+.stats{display:flex;gap:10px;flex-wrap:wrap;margin:12px 0}
+.stat{background:var(--soft);border:1px solid var(--line);border-radius:10px;padding:8px 14px}
+.stat b{font-size:20px;display:block}
+a{color:var(--brand2)}.hidden{display:none!important}
+details{margin-top:6px}summary{cursor:pointer;color:var(--brand2);font-weight:600}
+pre{white-space:pre-wrap;background:var(--soft);border:1px solid var(--line);border-radius:8px;
+padding:10px;font:13px/1.45 "Segoe UI",system-ui,sans-serif;color:var(--ink)}
+ul.sig{margin:6px 0 0;padding-left:18px}ul.sig li{margin-bottom:3px}
+.acts{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+.acts button,.acts a{padding:5px 10px;font-size:12.5px}
+dialog{border:0;border-radius:12px;padding:20px;max-width:760px;width:calc(100% - 24px);
+max-height:90vh;background:var(--card);color:var(--ink)}
+dialog::backdrop{background:rgba(0,0,0,.45)}
+.filters{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px}
+.saved{background:var(--on);border:1px solid var(--line);border-radius:10px;padding:12px;
+margin-bottom:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;justify-content:space-between}
+.hist{display:flex;justify-content:space-between;gap:10px;align-items:center;padding:10px 0;
+border-bottom:1px solid var(--line);flex-wrap:wrap}
+@media(max-width:720px){
+ .tabs{grid-template-columns:1fr}
+ #results thead{display:none}
+ #results tr{display:block;border:1px solid var(--line);border-radius:10px;padding:10px;margin-bottom:10px}
+ #results td{display:block;border:0;padding:3px 0}
+ #results td[data-l]:before{content:attr(data-l) ": ";color:var(--mute);font-size:12px}
+}
+</style></head><body>
+<header><div><h1>Signal Hunter</h1>
+<p>Warm leads: companies, founders &amp; small businesses already asking for GHL, CRM, Sales, CS &amp; VA help</p></div>
+<div class="hbtns"><button class="hbtn" onclick="openHistory()">History</button>
+<button class="hbtn" onclick="openProfile()">Profile &amp; keywords</button>
+<a class="hbtn hidden" id="logout" href="/logout" style="color:#fff;text-decoration:none;border-radius:8px;font-weight:600">Log out</a></div></header>
+<main>
+
+<div class="tabs">
+ <button class="tab on" id="tabList" onclick="setMode('list')"><b>Scan my list</b>
+  Add your companies. I rank them by how recently and how often they've shown a need.</button>
+ <button class="tab" id="tabDisc" onclick="setMode('discover')"><b>Find warm companies</b>
+  No list needed. I find founders, small businesses and companies who've recently asked for help or described a problem you solve.</button>
+</div>
+
+<div id="listMode">
+<section class="card">
+ <h2><span class="step">1</span>Give me your company list</h2>
+ <div class="saved hidden" id="savedBox"><div><b>Your weekly list</b>
+  <div class="muted" id="savedMsg"></div></div>
+  <div class="row" style="margin:0"><button onclick="start('saved')" id="savedBtn">Scan it now</button>
+  <button class="ghost" onclick="removeSaved()">Remove</button></div></div>
+ <div id="drop" onclick="pick.click()">
+  <div style="font-size:28px">&#128196;</div>
+  <div><b>Click to choose</b> or drag your Excel / CSV file here</div>
+  <div class="muted">.xlsx or .csv &middot; any column layout</div>
+ </div>
+ <input id="pick" type="file" accept=".xlsx,.xlsm,.csv" class="hidden">
+ <details style="margin-top:12px"><summary>Or paste company names</summary>
+  <textarea id="pasteIn" style="margin-top:8px;min-height:110px" placeholder="One per line: Company, website (website optional)&#10;Acme Dental, acmedental.com&#10;Bloom Florist, bloomflorist.com"></textarea>
+  <button class="ghost" style="margin-top:8px" onclick="usePaste()">Use these companies</button></details>
+ <div id="fileMsg" class="muted" style="margin-top:10px"></div>
+</section>
+<section class="card hidden" id="mapCard">
+ <h2><span class="step">2</span>Confirm the columns</h2>
+ <p class="muted" style="margin-top:-6px">I guessed these. Only <b>Company</b> is required; a <b>Website</b> column lets me check which CRM they use.</p>
+ <div class="grid" id="mapGrid"></div>
+ <div class="scroll" style="margin-top:14px"><table id="preview"></table></div>
+ <label class="muted" style="display:block;margin-top:14px"><input type="checkbox" id="saveList" checked>
+  Save as my weekly list (re-scanned automatically every Monday)</label>
+ <div class="row"><button class="big" id="startBtn" onclick="start('list')">Start scanning</button>
+  <span class="muted" id="countMsg"></span></div>
+</section>
+</div>
+
+<div id="discMode" class="hidden">
+<section class="card">
+ <h2><span class="step">1</span>Find people asking for help right now</h2>
+ <p class="muted" style="margin-top:-6px">Searches Reddit (r/forhire [Hiring], r/gohighlevel, r/smallbusiness,
+  r/Entrepreneur, r/sweatystartup and more), Hacker News and remote job boards. It catches direct asks <i>and</i>
+  owners describing a struggle ("drowning in admin", "can't get clients", "leads falling through the cracks").
+  People <i>offering</i> services are skipped. This also runs automatically every Monday.</p>
+ <div class="row"><label class="f">Look back
+  <select id="lbSel"><option value="14">2 weeks</option><option value="30">30 days</option>
+  <option value="45" selected>45 days</option><option value="60">60 days</option><option value="90">90 days</option></select></label>
+  <button class="big" id="discBtn" onclick="start('discover')" style="align-self:flex-end">Find warm leads</button>
+  <span class="muted" style="align-self:flex-end">About 1&ndash;3 minutes</span></div>
+</section>
+</div>
+
+<section class="card hidden" id="runCard">
+ <h2><span class="step">&#10003;</span><span id="runTitle">Scanning&hellip;</span></h2>
+ <div class="bar" id="barWrap"><div id="barFill"></div></div>
+ <div class="row" style="justify-content:space-between">
+  <span class="muted" id="runMsg"></span>
+  <button class="ghost" id="stopBtn" onclick="stopRun()">Stop</button></div>
+ <div class="stats" id="stats"></div>
+ <div class="row hidden" id="doneBtns"><a class="ghost" id="dlLink" href="#">Download tracker (.xlsx)</a></div>
+ <div class="filters hidden" id="filters"><span class="muted">Show:</span>
+  <select id="fTier" onchange="render()"><option value="">All tiers</option><option>HOT</option><option>WARM</option><option>COLD</option></select>
+  <select id="fNeed" onchange="render()"><option value="">All needs</option></select>
+  <select id="fSeg" onchange="render()"><option value="">All lead types</option>
+   <option value="small">Small businesses &amp; founders</option><option value="other">Other companies</option></select>
+  <label class="muted"><input type="checkbox" id="fNew" onchange="render()"> New only</label></div>
+ <div class="scroll" style="margin-top:12px"><table id="results"></table></div>
+</section>
+
+<p class="muted">Nothing is sent automatically. Open each signal link to confirm it before you reach out.
+For Reddit leads, reply on the post or send a DM using the draft.</p>
+</main>
+
+<dialog id="histDlg"><div style="display:flex;justify-content:space-between;align-items:center">
+ <h2 style="margin:0">Scan history</h2><button class="ghost" onclick="histDlg.close()">Close</button></div>
+ <div id="histList" style="margin-top:10px"></div></dialog>
+
+<dialog id="profile">
+ <h2 style="margin-top:0">Profile &amp; keywords</h2>
+ <div class="grid" id="profGrid"></div>
+ <label class="f" style="margin-top:12px">Proof point: one real result you delivered<textarea id="p_proof_point"></textarea></label>
+ <h3 style="margin:18px 0 4px;font-size:15px">What counts as a signal</h3>
+ <p class="muted" style="margin:0 0 8px">Comma-separated keywords for each service you offer.</p>
+ <div id="catGrid"></div>
+ <h3 style="margin:18px 0 4px;font-size:15px">Struggle phrases (owners describing a problem)</h3>
+ <p class="muted" style="margin:0 0 8px">If a post says one of these, it counts as a need for that service, even without the word "hiring".</p>
+ <div id="painGrid"></div>
+ <label class="f" style="margin-top:10px">Words that mark a small business / new founder<textarea id="p_small"></textarea></label>
+ <label class="f" style="margin-top:10px">Subreddits to watch (comma-separated)<textarea id="p_subs"></textarea></label>
+ <div class="row" style="justify-content:flex-end"><button class="ghost" onclick="profile.close()">Cancel</button>
+  <button onclick="saveProfile()">Save</button></div>
+</dialog>
+
+<script>
+const $=id=>document.getElementById(id);
+const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const enc=encodeURIComponent;
+let FILE=null,timer=null,ROWS=[];
+const FIELDS=[["company","Company (required)"],["website","Website"],["contact_name","Contact name"],
+ ["contact_email","Contact email"],["ats_slug","Job board slug"]];
+if("{{LOGOUT}}")$("logout").classList.remove("hidden");
+
+async function api(url,opts){const r=await fetch(url,opts);
+ if(r.status===401){location.href="/login";throw new Error("login")}
+ const d=await r.json().catch(()=>({}));return {ok:r.ok,d};}
+
+function setMode(m){$("tabList").classList.toggle("on",m==="list");$("tabDisc").classList.toggle("on",m==="discover");
+ $("listMode").classList.toggle("hidden",m!=="list");$("discMode").classList.toggle("hidden",m!=="discover");}
+
+const drop=$("drop");
+["dragenter","dragover"].forEach(e=>drop.addEventListener(e,ev=>{ev.preventDefault();drop.classList.add("over")}));
+["dragleave","drop"].forEach(e=>drop.addEventListener(e,ev=>{ev.preventDefault();drop.classList.remove("over")}));
+drop.addEventListener("drop",ev=>{const f=ev.dataTransfer.files[0];if(f)upload(f)});
+$("pick").addEventListener("change",ev=>{const f=ev.target.files[0];if(f)upload(f)});
+
+async function upload(f){$("fileMsg").textContent="Reading "+f.name+"...";
+ const {ok,d}=await api("/upload",{method:"POST",headers:{"X-Filename":enc(f.name)},body:f});handleFile(d,ok);}
+async function usePaste(){const t=$("pasteIn").value.trim();if(!t)return;
+ const {ok,d}=await api("/paste",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({text:t})});handleFile(d,ok);}
+function handleFile(d,ok){
+ if(!ok){$("fileMsg").innerHTML='<span class="err">'+esc(d.error)+'</span>';return}
+ FILE=d;$("fileMsg").innerHTML="&#9989; <b>"+esc(d.name)+"</b> loaded: "+d.rows+" rows";
+ const opts=h=>'<option value="">(none)</option>'+d.headers.map(x=>'<option'+(x===h?' selected':'')+'>'+esc(x)+'</option>').join("");
+ $("mapGrid").innerHTML=FIELDS.map(([k,l])=>'<label class="f">'+l+'<select id="m_'+k+'">'+opts(d.guess[k])+'</select></label>').join("");
+ $("preview").innerHTML="<tr>"+d.headers.map(h=>"<th>"+esc(h)+"</th>").join("")+"</tr>"+
+  d.preview.map(r=>"<tr>"+r.map(c=>"<td>"+esc(c)+"</td>").join("")+"</tr>").join("");
+ $("countMsg").textContent="About "+Math.max(1,Math.ceil(d.rows*8/60))+" min for "+d.rows+" companies";
+ $("mapCard").classList.remove("hidden");$("mapCard").scrollIntoView({behavior:"smooth"});}
+
+async function loadSaved(){const {d}=await api("/saved-list");
+ $("savedBox").classList.toggle("hidden",!d.count);
+ if(d.count)$("savedMsg").textContent=d.name+" · "+d.count+" companies · saved "+d.saved+" · re-scanned every Monday";}
+async function removeSaved(){if(!confirm("Remove your weekly list?"))return;await api("/saved-list",{method:"DELETE"});loadSaved();}
+
+async function start(mode){
+ const body={mode};
+ if(mode==="list"){if(!FILE)return;const mapping={};FIELDS.forEach(([k])=>mapping[k]=$("m_"+k).value);
+  if(!mapping.company){alert("Pick the Company column first.");return}
+  Object.assign(body,{upload_id:FILE.id,mapping,save_list:$("saveList").checked});}
+ if(mode==="discover")await api("/config",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({lookback_days:+$("lbSel").value})});
+ const {ok,d}=await api("/start",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+ if(!ok){alert(d.error);return}
+ showRunning();if(mode==="list"&&body.save_list)loadSaved();}
+function showRunning(){["startBtn","discBtn","savedBtn"].forEach(b=>$(b).disabled=true);
+ $("runCard").classList.remove("hidden");$("doneBtns").classList.add("hidden");$("filters").classList.add("hidden");
+ $("barWrap").classList.remove("hidden");$("stopBtn").classList.remove("hidden");
+ $("runTitle").textContent="Starting...";ROWS=[];render();$("runCard").scrollIntoView({behavior:"smooth"});
+ clearInterval(timer);poll();timer=setInterval(poll,1500);}
+async function stopRun(){await api("/stop",{method:"POST"});$("runMsg").textContent="Stopping..."}
+
+function stats(rows,newN){const t=rows.reduce((a,r)=>(a[r.tier]=(a[r.tier]||0)+1,a),{});
+ $("stats").innerHTML=[["HOT","Hot leads"],["WARM","Warm leads"],["COLD","Parked"]]
+  .map(([k,l])=>'<div class="stat"><b>'+(t[k]||0)+'</b><span class="pill '+k+'">'+l+'</span></div>').join("")+
+  (newN!=null?'<div class="stat"><b>'+newN+'</b><span class="pill NEW">New signals</span></div>':"");}
+
+async function poll(){
+ const {d}=await api("/status");
+ $("barFill").style.width=(d.total?Math.round(d.done/d.total*100):0)+"%";
+ if(d.state==="running"){ROWS=d.results;stats(ROWS,null);render();
+  $("runTitle").textContent=(d.label||"Scanning")+"...";
+  $("runMsg").textContent=(d.total?d.done+" of "+d.total+" · ":"")+(d.current||"Starting...");return}
+ clearInterval(timer);["startBtn","discBtn","savedBtn"].forEach(b=>$(b).disabled=false);$("stopBtn").classList.add("hidden");
+ if(d.run_id)loadRun(d.run_id);else if(d.state==="error"){$("runTitle").textContent="Something went wrong";
+  $("runMsg").innerHTML='<span class="err">'+esc(d.error)+'</span>';}}
+
+async function loadRun(id){
+ const {ok,d}=await api("/runs/"+id);if(!ok)return;
+ $("runCard").classList.remove("hidden");$("barWrap").classList.add("hidden");$("stopBtn").classList.add("hidden");
+ if(d.status==="error"){$("runTitle").textContent=d.label+" ("+d.created+")";
+  $("runMsg").innerHTML='<span class="err">'+esc(d.error||"Failed")+'</span>';ROWS=[];render();return}
+ if(d.status==="running"){showRunning();return}
+ ROWS=d.results;$("runTitle").textContent=d.label+" · "+d.created;
+ $("runMsg").textContent=ROWS.length+" leads found.";stats(ROWS,d.summary.new);
+ $("dlLink").href="/runs/"+id+"/xlsx";$("doneBtns").classList.remove("hidden");$("filters").classList.remove("hidden");
+ const needs=[...new Set(ROWS.flatMap(r=>r.needs))];
+ $("fNeed").innerHTML='<option value="">All needs</option>'+needs.map(n=>'<option>'+esc(n)+'</option>').join("");
+ render();}
+
+function gmail(r){const e=r.email;return "https://mail.google.com/mail/?view=cm&fs=1&to="+enc(r.to||"")+"&su="+enc(e.subject)+"&body="+enc(e.body);}
+function render(){
+ const order={HOT:0,WARM:1,COLD:2},ft=$("fTier").value,fn=$("fNeed").value,fnew=$("fNew").checked,fs=$("fSeg").value;
+ const rows=ROWS.filter(r=>(!ft||r.tier===ft)&&(!fn||r.needs.includes(fn))&&(!fnew||r.new)&&(!fs||(fs==="small")===!!r.segment))
+  .sort((a,b)=>order[a.tier]-order[b.tier]||b.score-a.score);
+ window._rows=rows;
+ $("results").innerHTML="<thead><tr><th>Lead</th><th>Tier</th><th>Score</th><th>Needs</th><th>Signals</th><th>Track</th><th>Evidence &amp; email</th></tr></thead><tbody>"+
+  rows.map((r,i)=>"<tr><td><b>"+esc(r.company)+"</b>"+(r.new?" <span class='pill NEW'>NEW</span>":"")+
+   (r.segment?"<div style='margin-top:3px'><span class='pill SMALL'>Small business / founder</span></div>":"")+
+   "<div class='muted'>"+esc(r.sources)+"</div></td><td data-l='Tier'><span class='pill "+r.tier+"'>"+r.tier+"</span></td>"+
+   "<td data-l='Score' class='sc'>"+r.score+"</td><td data-l='Needs'>"+(r.needs.map(n=>"<span class='need'>"+esc(n)+"</span>").join("")||"-")+"</td>"+
+   "<td data-l='Signals'>"+r.count+(r.newest?" <span class='muted'>(latest "+esc(r.newest)+")</span>":"")+"</td><td data-l='Track'>"+esc(r.track)+"</td><td>"+
+   "<ul class='sig'>"+r.signals.slice(0,3).map(s=>"<li><b>"+esc(s.label)+"</b> "+(s.date?"("+esc(s.date)+") ":"")+
+    (s.url?"<a href='"+esc(s.url)+"' target='_blank' rel='noopener'>"+esc(s.detail)+"</a>":esc(s.detail))+"</li>").join("")+"</ul>"+
+   (r.email?"<details><summary>View email draft</summary><pre id='e"+i+"'><b>Subject:</b> "+esc(r.email.subject)+"\n\n"+esc(r.email.body)+"</pre>"+
+    "<div class='acts'><button class='ghost' onclick='copyEmail("+i+",this)'>Copy</button>"+
+    (r.person?(r.url?"<a class='ghost' href='"+esc(r.url)+"' target='_blank' rel='noopener'>Open post to reply</a>":""):
+     "<a class='ghost' href='"+esc(gmail(r))+"' target='_blank' rel='noopener'>Open in Gmail</a>")+"</div></details>":"")+
+   "</td></tr>").join("")+"</tbody>";}
+function copyEmail(i,btn){navigator.clipboard.writeText($("e"+i).innerText).then(()=>{btn.textContent="Copied";setTimeout(()=>btn.textContent="Copy",1500)})}
+
+async function openHistory(){const {d}=await api("/runs");
+ $("histList").innerHTML=d.length?d.map(r=>"<div class='hist'><div><b>"+esc(r.label)+"</b><div class='muted'>"+esc(r.created)+
+  (r.status==="done"?" · "+r.summary.count+" leads · "+(r.summary.HOT||0)+" hot · "+(r.summary.new||0)+" new":" · "+esc(r.status))+
+  "</div></div><div class='acts'><button onclick='histDlg.close();loadRun("+r.id+")'>Open</button>"+
+  (r.status==="done"?"<a class='ghost' href='/runs/"+r.id+"/xlsx'>Excel</a>":"")+"</div></div>").join(""):"<p class='muted'>No scans yet.</p>";
+ histDlg.showModal();}
+
+const PROF=[["your_name","Your name"],["headline","Headline"],["email","Email"],["linkedin","LinkedIn URL"],
+ ["portfolio","Portfolio URL"],["years","Years of B2B sales"],["tools","Tools you know"],["hiring_manager_titles","Hiring manager titles to search"]];
+let CATS={},PAIN={};
+const listBox=(id,obj)=>Object.keys(obj).map((k,i)=>'<label class="f" style="margin-bottom:8px">'+esc(k)+'<textarea id="'+id+i+'">'+esc(obj[k].join(", "))+'</textarea></label>').join("");
+const split=v=>v.split(",").map(s=>s.trim()).filter(Boolean);
+async function openProfile(){const {d:c}=await api("/config");CATS=c.categories||{};PAIN=c.pain_signals||{};
+ $("profGrid").innerHTML=PROF.map(([k,l])=>'<label class="f">'+l+'<input type="text" id="p_'+k+'" value="'+esc(c[k])+'"></label>').join("");
+ $("p_proof_point").value=c.proof_point||"";$("catGrid").innerHTML=listBox("cat",CATS);$("painGrid").innerHTML=listBox("pain",PAIN);
+ $("p_small").value=(c.smallbiz_words||[]).join(", ");$("p_subs").value=(c.subreddits||[]).join(", ");profile.showModal();}
+async function saveProfile(){const b={proof_point:$("p_proof_point").value};PROF.forEach(([k])=>b[k]=$("p_"+k).value);
+ b.categories={};Object.keys(CATS).forEach((k,i)=>b.categories[k]=split($("cat"+i).value));
+ b.pain_signals={};Object.keys(PAIN).forEach((k,i)=>b.pain_signals[k]=split($("pain"+i).value));
+ b.smallbiz_words=split($("p_small").value);b.subreddits=split($("p_subs").value).map(s=>s.replace(/^r\//,""));
+ await api("/config",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)});profile.close();}
+
+(async()=>{loadSaved();const {d}=await api("/status");
+ if(d.state==="running"){showRunning();return}
+ const {d:runs}=await api("/runs?limit=1");if(runs.length)loadRun(runs[0].id);})();
+</script></body></html>

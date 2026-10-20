@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Signal Hunter</title>
+<style>
+:root{--bg:#f4f6f9;--card:#fff;--ink:#16202c;--mute:#5f6b7a;--line:#dfe4ea;--brand:#1f3a5f}
+@media (prefers-color-scheme:dark){:root{--bg:#0f1720;--card:#16212d;--ink:#e6edf3;--mute:#9aa7b4;--line:#2a3a4a;--brand:#4f86c6}}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;display:grid;place-items:center;padding:16px;
+font:15px/1.5 "Segoe UI",system-ui,sans-serif;background:var(--bg);color:var(--ink)}
+form{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:28px;
+width:100%;max-width:360px}
+h1{margin:0 0 4px;font-size:22px}p{margin:0 0 18px;color:var(--mute);font-size:14px}
+input{width:100%;font:inherit;padding:11px 12px;border:1px solid var(--line);border-radius:8px;
+background:var(--bg);color:var(--ink)}
+button{width:100%;margin-top:12px;font:inherit;font-weight:600;border:0;border-radius:8px;
+padding:11px;background:var(--brand);color:#fff;cursor:pointer}
+.err{color:#dc2626;font-weight:600;margin-top:10px;min-height:1em}
+</style></head><body>
+<form method="post">
+ <h1>Signal Hunter</h1>
+ <p>Warm leads for your GHL, CRM, Sales &amp; VA services</p>
+ <input type="password" name="password" placeholder="Password" autofocus required>
+ <button>Log in</button>
+ <div class="err">{{ERR}}</div>
+</form></body></html>
