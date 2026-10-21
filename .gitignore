@@ -8,3 +8,4 @@ uploads/
 .env
 tests/test.db
 .pytest_cache/
+signalhunter.env
