@@ -73,3 +73,42 @@ def test_build_email_never_empty(cfg):
     for r in sh.discover(cfg):
         subject, body = sh.build_email(cfg, r["company"], r)
         assert subject and cfg["your_name"] in body
+
+
+def test_ask_needs_the_service_in_the_same_clause(matchers):
+    # the junk posts from the review: intent word and service word in different clauses
+    junk = sh.classify_post("We are hiring a Rust dev, no sales", "", "startups", matchers)
+    assert junk is None or junk[0] != "ask"
+    junk = sh.classify_post("Anyone recommend a good pizza place, my sales are fine", "",
+                            "Entrepreneur", matchers)
+    assert junk is None or junk[0] != "ask"
+    # real asks still count, whether the need comes before or after the ask
+    assert sh.classify_post("Looking for someone to build GHL snapshots", "", "gohighlevel",
+                            matchers)[:2] == ("ask", "GoHighLevel")
+    assert sh.classify_post("GoHighLevel expert needed", "", "gohighlevel",
+                            matchers)[:2] == ("ask", "GoHighLevel")
+    # a [Hiring] tag makes the whole post the ask
+    assert sh.classify_post("[Hiring] Help with our agency", "Need someone. Must know HubSpot.",
+                            "forhire", matchers)[:2] == ("ask", "CRM Automation")
+
+
+def test_exclude_words_skip_job_seekers(matchers):
+    assert sh.classify_post("Virtual assistant looking for work, need clients", "",
+                            "VirtualAssistant", matchers) is None
+
+
+def test_tiers_need_more_than_one_ageing_post():
+    def ev(kind, days, points=50):
+        d = (sh.datetime.now() - sh.timedelta(days=days)).strftime("%Y-%m-%d")
+        return {"kind": kind, "date": d, "points": points}
+    assert sh.tier_of(50, [ev("ask", 3)]) == "HOT"           # fresh direct ask
+    assert sh.tier_of(50, [ev("ask", 20)]) == "WARM"         # one older ask
+    assert sh.tier_of(50, [ev("struggle", 2)]) == "WARM"     # a struggle alone
+    assert sh.tier_of(60, [ev("struggle", 2), ev("tech", 2)]) == "HOT"  # backed up
+    assert sh.tier_of(20, [ev("job_locked", 1)]) == "COLD"
+
+
+def test_discover_tiers_are_spread(cfg):
+    tiers = [r["tier"] for r in sh.discover(cfg)]
+    assert "HOT" in tiers and "WARM" in tiers
+    assert tiers.count("HOT") < len(tiers) / 2

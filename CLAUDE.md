@@ -4,8 +4,8 @@ Personal lead-finding web app for Naveed (remote CRM, GHL, Sales and VA services
 
 ## Architecture
 - `signal_hunter.py`: the engine. **All network access goes through `http_get()`**, so tests can patch it. The main entry points are `run(companies, cfg, on_progress, should_stop)` and `discover(cfg, ...)`. Both return result dicts, and `write_outputs(cfg, results, label, seen=dict, out_dir=..., emails=False)` builds the Excel file.
-- Scoring constants: `KIND_POINTS` / `KIND_LABEL`, recency in `recency()`, per-category cap `CATEGORY_CAP`, small-business bonus `SMALLBIZ_BONUS`. Lead types: `SEG_SMALL`.
-- Post classification: `classify_post()`. It uses `OFFER_RE` to skip competitors, `INTENT_RE` to detect "ask", pain phrases to detect "struggle", and keywords to detect "mention".
+- Scoring constants: `KIND_POINTS` / `KIND_LABEL`, recency in `recency()`, per-category cap `CATEGORY_CAP`, small-business bonus `SMALLBIZ_BONUS`. Tiers come from `tier_of()`: HOT needs the score plus either 2+ signals or one fresh ask / eligible job (`HOT_FRESH_DAYS`). Lead types: `SEG_SMALL`.
+- Post classification: `classify_post()`. It uses `OFFER_RE` and the `exclude_words` setting to skip competitors and job seekers, `ask_need()` (an `INTENT_RE` hit with a service keyword or pain phrase in the same clause) to detect "ask", pain phrases to detect "struggle", and keywords to detect "mention".
 - Email copy: `build_email()`, which uses `NEED_PHRASE`, `QUICK_WINS`, `SMALL_WINS`, `PAIN_*`.
 - `webapp.py`: Flask app. It runs **1 gunicorn worker** on purpose, because the live job state (`JOB`) lives in memory. Scans run in a background thread. Results are persisted through `db.py`.
 - `db.py`: SQLite or Postgres via `DATABASE_URL`. The `?` placeholders are converted to `%s` for Postgres. Keep SQL portable between the two (`ON CONFLICT`, `RETURNING` work on both).

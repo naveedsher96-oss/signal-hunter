@@ -128,6 +128,10 @@ SMALL_SITE_PATTERNS = {"Wix": ["wix.com", "wixstatic", "_wixcss"],
                        "Carrd": ["carrd.co"], "Shopify": ["cdn.shopify.com"],
                        "Linktree": ["linktr.ee"]}
 SEG_SMALL = "Small business / founder"
+# Posts containing these are skipped (job seekers, people selling services)
+DEFAULT_EXCLUDE = ["looking for work", "looking for a job", "looking for job",
+                   "open to work", "job hunting", "job seeker", "my resume", "my cv",
+                   "hire me", "i can help you", "offering my services"]
 DEFAULT_HN_KEYWORDS = ["gohighlevel", "virtual assistant", "crm", "revops",
                        "sales operations", "customer success", "data entry", "hubspot",
                        "salesforce admin", "zoho", "business development"]
@@ -198,6 +202,8 @@ KIND_LABEL = {
     "expansion": "Expansion / launch",
 }
 CATEGORY_CAP = 60
+HOT_SCORE, WARM_SCORE = 50, 25
+HOT_FRESH_DAYS = 7  # a single strong signal is HOT only while it's this fresh
 
 NEWS_RULES = [
     ("funding", re.compile(r"(raises|raised|secures|closes|lands|funding|series [a-e]\b|"
@@ -346,6 +352,7 @@ def with_defaults(cfg):
     cfg.setdefault("discover_limit", 75)
     cfg.setdefault("pain_signals", DEFAULT_PAIN)
     cfg.setdefault("smallbiz_words", DEFAULT_SMALLBIZ)
+    cfg.setdefault("exclude_words", DEFAULT_EXCLUDE)
     cfg.setdefault("delay_seconds", 1)
     return cfg
 
@@ -699,6 +706,7 @@ class Matchers:
         self.pain = {k: rx for k, v in (cfg.get("pain_signals") or DEFAULT_PAIN).items()
                      for rx in [phrase_regex(v)] if rx}
         self.small = phrase_regex(cfg.get("smallbiz_words") or DEFAULT_SMALLBIZ)
+        self.exclude = phrase_regex(cfg.get("exclude_words") or [])
 
     def pains(self, text):
         hits = [(m.start(), n) for n, rx in self.pain.items()
@@ -711,18 +719,44 @@ class Matchers:
         return ""
 
 
+CLAUSE_END = re.compile(r"[.!?;,\n]")
+HIRING_TAG = re.compile(r"\[(hiring|task)\]", re.I)
+
+
+def ask_need(title, full, m):
+    """The service someone is asking for, or None. The need must sit in the same
+    clause as the ask ("looking for a GHL expert"), so "we're hiring a Rust dev, no
+    sales" or "anyone recommend a pizza place, my sales are fine" don't count."""
+    if HIRING_TAG.search(title):  # structured [Hiring] post: the whole post is the ask
+        clauses = [full]
+    else:
+        clauses = []
+        for hit in INTENT_RE.finditer(full):
+            before = CLAUSE_END.split(full[max(0, hit.start() - 100):hit.start()])[-1]
+            after = CLAUSE_END.split(full[hit.end():hit.end() + 100])[0]
+            clauses.append(before + hit.group(0) + after)
+    for clause in clauses:
+        need = (categorize(clause, m.cats) or m.pains(clause) or [None])[0]
+        if need:
+            return need
+    return None
+
+
 def classify_post(title, text, sub, m):
     """-> (kind, category, segment) or None. Skips people offering services."""
     full = f"{title} {text}"
     if OFFER_RE.search(title) or OFFER_RE.search(text[:200]):
+        return None
+    if m.exclude and m.exclude.search(full):
         return None
     if sub.lower() in ("forhire", "slavelabour") and not re.search(
             r"\[(hiring|task)\]|hiring", title, re.I):
         return None
     cats, pains = categorize(full, m.cats), m.pains(full)
     seg = m.segment(full, sub)
-    if INTENT_RE.search(full) and (cats or pains):
-        return "ask", (cats or pains)[0], seg
+    need = ask_need(title, full, m)
+    if need:
+        return "ask", need, seg
     if pains:
         return "struggle", pains[0], seg
     if cats:
@@ -908,14 +942,26 @@ def analyse(name, events, lookback):
                     and e.get("role")), None) or next(
         (e for e in evs if e.get("role")), None)
     dates = [e["date"] for e in evs if e["date"]]
-    return {"signals": evs, "score": score,
-            "tier": "HOT" if score >= 50 else "WARM" if score >= 25 else "COLD",
+    return {"signals": evs, "score": score, "tier": tier_of(score, evs),
             "track": track, "remote_evidence": remote_ev, "needs": needs,
             "segment": segment,
             "intent_count": sum(e["kind"] in ("ask", "struggle", "mention", "hiring_news")
                                 or e["kind"].startswith("job") for e in evs),
             "newest": max(dates) if dates else "",
             "top_role": role_ev.get("role") if role_ev else ""}
+
+
+def tier_of(score, evs):
+    """HOT needs a high score backed by either two or more signals or one fresh,
+    direct one (an ask or a job you can apply to) - not one ageing post."""
+    if score >= HOT_SCORE:
+        top = evs[0] if evs else {}
+        age = days_ago(top.get("date", ""))
+        fresh = (top.get("kind") in ("ask", "job_eligible") and age is not None
+                 and age <= HOT_FRESH_DAYS)
+        if len(evs) >= 2 or fresh:
+            return "HOT"
+    return "WARM" if score >= WARM_SCORE else "COLD"
 
 
 def scan_company(c, cfg, m, feed_jobs):
