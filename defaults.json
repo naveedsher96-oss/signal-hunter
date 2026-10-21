@@ -244,5 +244,18 @@
     "self-employed",
     "self employed",
     "owner"
+  ],
+  "exclude_words": [
+    "looking for work",
+    "looking for a job",
+    "looking for job",
+    "open to work",
+    "job hunting",
+    "job seeker",
+    "my resume",
+    "my cv",
+    "hire me",
+    "i can help you",
+    "offering my services"
   ]
 }

@@ -179,6 +179,7 @@ For Reddit leads, reply on the post or send a DM using the draft.</p>
  <div id="painGrid"></div>
  <label class="f" style="margin-top:10px">Words that mark a small business / new founder<textarea id="p_small"></textarea></label>
  <label class="f" style="margin-top:10px">Subreddits to watch (comma-separated)<textarea id="p_subs"></textarea></label>
+ <label class="f" style="margin-top:10px">Skip posts containing (job seekers, people selling services)<textarea id="p_excl"></textarea></label>
  <div class="row" style="justify-content:flex-end"><button class="ghost" onclick="profile.close()">Cancel</button>
   <button onclick="saveProfile()">Save</button></div>
 </dialog>
@@ -304,11 +305,11 @@ const split=v=>v.split(",").map(s=>s.trim()).filter(Boolean);
 async function openProfile(){const {d:c}=await api("/config");CATS=c.categories||{};PAIN=c.pain_signals||{};
  $("profGrid").innerHTML=PROF.map(([k,l])=>'<label class="f">'+l+'<input type="text" id="p_'+k+'" value="'+esc(c[k])+'"></label>').join("");
  $("p_proof_point").value=c.proof_point||"";$("catGrid").innerHTML=listBox("cat",CATS);$("painGrid").innerHTML=listBox("pain",PAIN);
- $("p_small").value=(c.smallbiz_words||[]).join(", ");$("p_subs").value=(c.subreddits||[]).join(", ");profile.showModal();}
+ $("p_small").value=(c.smallbiz_words||[]).join(", ");$("p_subs").value=(c.subreddits||[]).join(", ");$("p_excl").value=(c.exclude_words||[]).join(", ");profile.showModal();}
 async function saveProfile(){const b={proof_point:$("p_proof_point").value};PROF.forEach(([k])=>b[k]=$("p_"+k).value);
  b.categories={};Object.keys(CATS).forEach((k,i)=>b.categories[k]=split($("cat"+i).value));
  b.pain_signals={};Object.keys(PAIN).forEach((k,i)=>b.pain_signals[k]=split($("pain"+i).value));
- b.smallbiz_words=split($("p_small").value);b.subreddits=split($("p_subs").value).map(s=>s.replace(/^r\//,""));
+ b.smallbiz_words=split($("p_small").value);b.subreddits=split($("p_subs").value).map(s=>s.replace(/^r\//,""));b.exclude_words=split($("p_excl").value);
  await api("/config",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)});profile.close();}
 
 (async()=>{loadSaved();const {d}=await api("/status");
