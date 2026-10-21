@@ -125,6 +125,23 @@ def test_freelancer_and_jobicy_leads(cfg):
     assert sh.is_person("Freelancer.com project #1") and not sh.is_person("Peak Roofing")
 
 
+def test_contact_finder_fills_email(cfg):
+    results = {r["company"]["company"]: r for r in sh.discover(cfg)}
+    nim = results["Nimbus Realty"]
+    assert nim["company"]["contact_email"] == "sarah.lee@nimbusrealty.com"
+    assert nim["company"]["contact_name"] == "Sarah Lee"
+    assert nim["company"]["website"] == "https://nimbusrealty.com"
+    # person leads keep "reply on the post" - no invented contact
+    assert not results["Freelancer.com project #40778167"]["company"].get("contact_email")
+
+
+def test_contact_emails_filters_junk():
+    page = ('<a href="mailto:jane.doe@acme.com">x</a> noreply@acme.com '
+            'icon@2x.png a@example.com info@acme.com')
+    assert sh.contact_emails(page, "acme.com") == ["jane.doe@acme.com",
+                                                   "info@acme.com"]
+
+
 def test_reddit_is_off_by_default(cfg):
     off = dict(cfg)
     del off["use_reddit"]

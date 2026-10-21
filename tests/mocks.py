@@ -54,6 +54,11 @@ R={
  "jobicy.com/api/v2/remote-jobs":{"jobs":[{"companyName":"Peak Roofing","jobTitle":"GoHighLevel Automation Specialist","jobGeo":"Anywhere","url":"https://jobicy.com/jobs/1","pubDate":iso(3)}]},
  "https://acmedental.com":"<html><script src='https://widgets.leadconnectorhq.com/loader.js'></script></html>",
  "https://zapier.com":"<html><script src='//js.hs-scripts.com/123.js'></script></html>",
+ "https://nimbusrealty.com":"""<html><title>Nimbus Realty - homes in Portland</title>
+   <a href="/contact">Contact us</a></html>""",
+ "https://nimbusrealty.com/contact":"""<html>Nimbus Realty - reach Sarah:
+   <a href="mailto:sarah.lee@nimbusrealty.com">email</a> or info@nimbusrealty.com.
+   Automated mail: noreply@nimbusrealty.com. Tracking pixel icon@2x.png</html>""",
 }
 CALLS=[]
 def http_get(url, as_json=True, headers=None):

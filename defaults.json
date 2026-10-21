@@ -81,6 +81,8 @@
     ]
   },
   "use_reddit": false,
+  "find_contacts": true,
+  "contact_limit": 20,
   "subreddits": [
     "forhire",
     "hiring",

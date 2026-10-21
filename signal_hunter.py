@@ -360,6 +360,8 @@ def with_defaults(cfg):
     cfg.setdefault("exclude_words", DEFAULT_EXCLUDE)
     cfg.setdefault("freelancer_queries", DEFAULT_FREELANCER_QUERIES)
     cfg.setdefault("use_reddit", False)  # Reddit needs an approved API key; off until then
+    cfg.setdefault("find_contacts", True)  # find emails on company sites (free)
+    cfg.setdefault("contact_limit", 20)    # how many top leads to enrich per scan
     cfg.setdefault("delay_seconds", 1)
     return cfg
 
@@ -1038,6 +1040,7 @@ def run(companies, cfg, on_progress=None, should_stop=lambda: False):
         if on_progress:
             on_progress(i, len(companies), c["company"], res)
         time.sleep(cfg.get("delay_seconds", 1))
+    enrich_contacts(results, cfg, on_progress, should_stop)
     return results
 
 
@@ -1145,7 +1148,125 @@ def discover(cfg, on_progress=None, should_stop=lambda: False):
                    sources=", ".join(sorted({e["source"] for e in res["signals"]})))
         results.append(res)
     results.sort(key=lambda r: (r["score"], r["newest"]), reverse=True)
-    return results[: cfg.get("discover_limit", 75)]
+    results = results[: cfg.get("discover_limit", 75)]
+    enrich_contacts(results, cfg, on_progress, should_stop)
+    return results
+
+# ---------------------------------------------------------------- contacts --
+
+EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}")
+BAD_TLDS = {"png", "jpg", "jpeg", "gif", "svg", "webp", "css", "js", "ico", "woff",
+            "woff2", "ttf", "eot", "mp4", "pdf", "zip"}
+BAD_LOCAL = ("noreply", "no-reply", "donotreply", "mailer", "daemon", "postmaster",
+             "unsubscribe", "example", "yourname", "username", "your_email", "test@")
+BAD_DOMAIN = ("example.", "sentry", "wixpress", "yourdomain", "domain.tld")
+GENERIC_LOCAL = {"info", "hello", "hi", "contact", "team", "support", "help",
+                 "sales", "careers", "jobs", "admin", "office", "enquiries",
+                 "inquiries", "grow", "getstarted", "mail", "connect"}
+CONTACT_PATHS = ("contact", "about", "team", "careers", "staff", "leadership",
+                 "people", "company")
+
+
+def contact_emails(page, domain):
+    """Ranked emails on one page: same-domain and personal-looking addresses first."""
+    out = {}
+    for e in EMAIL_RE.findall(page or ""):
+        e = e.strip(".,;:()>[]\"'").lower()
+        local, _, dom = e.rpartition("@")
+        if not local or not dom or dom.rsplit(".", 1)[-1] in BAD_TLDS:
+            continue
+        if any(b in local for b in BAD_LOCAL) or any(b in dom for b in BAD_DOMAIN):
+            continue
+        if len(local) > 40 or len(e) > 70:
+            continue
+        core = local.split("+")[0]
+        personal = bool(re.match(r"^[a-z]{2,}[._-][a-z]{2,}$", core))
+        score = (3 if dom == domain or dom.endswith("." + domain) else 0) + \
+                (2 if personal else 0) + (1 if core in GENERIC_LOCAL else 0)
+        out[e] = max(out.get(e, 0), score)
+    return [e for e, _ in sorted(out.items(), key=lambda x: (-x[1], x[0]))][:5]
+
+
+def guess_site(c):
+    """For a company with no website: try <slug>.com/.io/.co, kept only when the
+    page actually mentions the company name."""
+    base = norm(c.get("company", ""))
+    slug = base.replace(" ", "")
+    if len(slug) < 3:
+        return "", None
+    for tld in ("com", "io", "co"):
+        dom = f"{slug}.{tld}"
+        page = http_get(f"https://{dom}", as_json=False)
+        if page and name_regex(c["company"]).search(strip_html(page)[:4000]):
+            return dom, page
+    return "", None
+
+
+def find_contacts(c):
+    """Free contact-finding: the company's homepage, then its contact/about/team
+    pages. Returns (ranked emails, guessed contact name, site domain)."""
+    dom, home = domain_of(c.get("website", "")), None
+    if dom:
+        home = http_get(f"https://{dom}", as_json=False)
+    if not home and not is_person(c.get("company", "")):
+        dom, home = guess_site(c)
+    if not home:
+        return [], "", ""
+    pages, seen, i = [home], set(), 0
+    while i < len(pages) and len(pages) < 5:
+        for href in re.findall(r"href=[\"']([^\"']+)[\"']", pages[i]):
+            if len(pages) >= 5:
+                break
+            if not any(p in href.lower() for p in CONTACT_PATHS):
+                continue
+            u = urllib.parse.urljoin(f"https://{dom}/", href)
+            if domain_of(u) != dom or u in seen:
+                continue
+            seen.add(u)
+            sub = http_get(u, as_json=False)
+            if sub:
+                pages.append(sub)
+        i += 1
+    emails = []
+    for p in pages:
+        for e in contact_emails(p, dom):
+            if e not in emails:
+                emails.append(e)
+    name = ""
+    if emails:
+        m = re.match(r"^([a-z]{3,})[._-]([a-z]{3,})$", emails[0].split("@")[0])
+        if m and m.group(1) not in GENERIC_LOCAL:
+            name = f"{m.group(1).title()} {m.group(2).title()}"
+    return emails[:3], name, dom
+
+
+def enrich_contacts(results, cfg, on_progress=None, should_stop=lambda: False):
+    """Fill contact_email / contact_name on the top company leads, free, from their
+    own websites. Person leads keep 'reply on the post'."""
+    if not cfg.get("find_contacts", True):
+        return
+    limit = int(cfg.get("contact_limit", 20))
+    ranked = sorted(results, key=lambda r: r.get("score", 0), reverse=True)
+    tried = 0
+    for r in ranked:
+        if tried >= limit or should_stop():
+            break
+        c = r.get("company") or {}
+        if c.get("contact_email") or is_person(c.get("company", "")):
+            continue
+        if r.get("tier") == "COLD":
+            continue
+        tried += 1
+        if on_progress:
+            on_progress(tried, limit, f"Finding contacts: {c['company']}", None)
+        emails, name, dom = find_contacts(c)
+        if dom and not c.get("website"):
+            c["website"] = f"https://{dom}"
+        if emails:
+            c["contact_email"] = emails[0]
+            if name and not c.get("contact_name"):
+                c["contact_name"] = name
+        time.sleep(max(0.5, cfg.get("delay_seconds", 1)))
 
 # ------------------------------------------------------------------ emails --
 
