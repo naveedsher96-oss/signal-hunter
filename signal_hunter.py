@@ -20,7 +20,7 @@ Two modes:
   python signal_hunter.py my_list.xlsx     scan YOUR company list
   python signal_hunter.py --discover       find warm companies with no list
 
-Most people use the app instead: double-click "Start Signal Hunter.bat".
+Most people use the app instead: double-click "Run locally.bat" (or python webapp.py).
 Nothing is ever sent. You review every email before sending it yourself.
 """
 

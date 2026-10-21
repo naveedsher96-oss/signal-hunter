@@ -186,16 +186,37 @@ def require_login():
     return redirect(url_for("login"))
 
 
+FAILS = {}  # ip -> [failed login times]
+MAX_FAILS, FAIL_WINDOW = 5, 15 * 60
+
+
+def _client_ip():
+    # The last X-Forwarded-For entry is added by Render's proxy; earlier ones can be faked
+    fwd = request.headers.get("X-Forwarded-For", "")
+    return fwd.split(",")[-1].strip() if fwd else (request.remote_addr or "")
+
+
 @app.route("/login", methods=["GET", "POST"])
 def login():
     err = ""
     if request.method == "POST":
-        if hmac.compare_digest(request.form.get("password", ""), APP_PASSWORD):
+        ip, t = _client_ip(), time.time()
+        with LOCK:
+            recent = [f for f in FAILS.get(ip, []) if t - f < FAIL_WINDOW]
+            FAILS[ip] = recent
+        if len(recent) >= MAX_FAILS:
+            err = "Too many wrong passwords. Try again in 15 minutes."
+        elif hmac.compare_digest(request.form.get("password", ""), APP_PASSWORD):
+            with LOCK:
+                FAILS.pop(ip, None)
             session.permanent = True
             session["ok"] = True
             return redirect(url_for("index"))
-        time.sleep(1.5)  # slow down guessing
-        err = "Wrong password."
+        else:
+            with LOCK:
+                FAILS.setdefault(ip, []).append(t)
+            time.sleep(1.5)  # slow down guessing
+            err = "Wrong password."
     return Response(LOGIN_PAGE.replace("{{ERR}}", err), mimetype="text/html")
 
 
@@ -231,7 +252,10 @@ def config():
             if k not in EDITABLE:
                 continue
             if k == "lookback_days":
-                v = max(7, min(180, int(v or 45)))
+                try:
+                    v = max(7, min(180, int(v or 45)))
+                except (TypeError, ValueError):
+                    return jsonify(error="Lookback days must be a number."), 400
             cfg[k] = v
         db.set_setting("config", cfg)
     return jsonify(cfg)
@@ -304,7 +328,8 @@ def start():
 
 @app.route("/stop", methods=["POST"])
 def stop():
-    JOB["stop"] = True
+    with LOCK:
+        JOB["stop"] = True
     return jsonify(ok=True)
 
 
@@ -342,7 +367,8 @@ def run_xlsx(run_id):
 # -------------------------------------------------------------------- cron --
 
 def _cron_ok():
-    token = request.headers.get("X-Cron-Token") or request.args.get("token", "")
+    # Header only: a token in the URL would end up in server logs
+    token = request.headers.get("X-Cron-Token", "")
     return bool(CRON_TOKEN) and hmac.compare_digest(token, CRON_TOKEN)
 
 

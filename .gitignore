@@ -6,3 +6,5 @@ signal_hunter.db
 output/
 uploads/
 .env
+tests/test.db
+.pytest_cache/
