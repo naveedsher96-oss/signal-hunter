@@ -12,6 +12,7 @@ Personal lead-finding web app for Naveed (remote CRM, GHL, Sales and VA services
 - User settings are stored in the database under the setting `config`. `defaults.json` only seeds that setting. `sh.with_defaults()` fills in any missing keys.
 
 ## Testing
+- Automated tests: `pip install pytest && python -m pytest -q tests` (offline, under a second). CI runs them on every push and PR (`.github/workflows/tests.yml`). `tests/conftest.py` patches `http_get` with the fakes and skips the polite sleeps.
 - Offline UI test: `APP_PASSWORD=test CRON_TOKEN=tok python tests/run_mock_server.py`, then open http://127.0.0.1:8765 (password `test`).
 - Fake sources live in `tests/mocks.py`, keyed by URL substring, with real API response shapes.
 - Production-like test: `gunicorn --chdir tests mock_wsgi:app --workers 1 --threads 8` with `DATABASE_URL` pointing at a Postgres server.

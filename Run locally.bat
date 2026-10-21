@@ -9,7 +9,7 @@ if errorlevel 1 (
   exit /b
 )
 echo Checking requirements (first run takes a minute)...
-python -m pip install --quiet --disable-pip-version-check flask requests openpyxl
+python -m pip install --quiet --disable-pip-version-check -r requirements.txt
 echo.
 python webapp.py
 pause

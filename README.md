@@ -88,4 +88,4 @@ This opens http://127.0.0.1:8765 in your browser. Locally the data is stored in 
 | `defaults.json` | Default profile and keywords (copied into the database on first run) |
 | `render.yaml` | Render deployment |
 | `.github/workflows/weekly-scan.yml` | Monday scan |
-| `tests/` | Offline test harness with fake sources: `APP_PASSWORD=test CRON_TOKEN=tok python tests/run_mock_server.py` |
+| `tests/` | Automated tests (`python -m pytest -q tests`) and an offline UI harness with fake sources: `APP_PASSWORD=test CRON_TOKEN=tok python tests/run_mock_server.py` |
