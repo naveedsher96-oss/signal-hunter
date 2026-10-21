@@ -130,8 +130,8 @@ border-bottom:1px solid var(--line);flex-wrap:wrap}
 <div id="discMode" class="hidden">
 <section class="card">
  <h2><span class="step">1</span>Find people asking for help right now</h2>
- <p class="muted" style="margin-top:-6px">Searches Reddit (r/forhire [Hiring], r/gohighlevel, r/smallbusiness,
-  r/Entrepreneur, r/sweatystartup and more), Hacker News and remote job boards. It catches direct asks <i>and</i>
+ <p class="muted" style="margin-top:-6px">Searches open Freelancer.com projects, Hacker News, remote job boards and, if you turn it on,
+  Reddit. It catches direct asks <i>and</i>
   owners describing a struggle ("drowning in admin", "can't get clients", "leads falling through the cracks").
   People <i>offering</i> services are skipped. This also runs automatically every Monday.</p>
  <div class="row"><label class="f">Look back
@@ -160,7 +160,7 @@ border-bottom:1px solid var(--line);flex-wrap:wrap}
 </section>
 
 <p class="muted">Nothing is sent automatically. Open each signal link to confirm it before you reach out.
-For Reddit leads, reply on the post or send a DM using the draft.</p>
+For Freelancer.com leads, bid on the project using the draft. For Reddit or Hacker News leads, reply on the post.</p>
 </main>
 
 <dialog id="histDlg"><div style="display:flex;justify-content:space-between;align-items:center">
@@ -178,6 +178,8 @@ For Reddit leads, reply on the post or send a DM using the draft.</p>
  <p class="muted" style="margin:0 0 8px">If a post says one of these, it counts as a need for that service, even without the word "hiring".</p>
  <div id="painGrid"></div>
  <label class="f" style="margin-top:10px">Words that mark a small business / new founder<textarea id="p_small"></textarea></label>
+ <label class="f" style="margin-top:10px">Freelancer.com searches (comma-separated)<textarea id="p_fl"></textarea></label>
+ <label style="display:block;margin-top:10px"><input type="checkbox" id="p_reddit"> Search Reddit (only works once Reddit approves your API key)</label>
  <label class="f" style="margin-top:10px">Subreddits to watch (comma-separated)<textarea id="p_subs"></textarea></label>
  <label class="f" style="margin-top:10px">Skip posts containing (job seekers, people selling services)<textarea id="p_excl"></textarea></label>
  <div class="row" style="justify-content:flex-end"><button class="ghost" onclick="profile.close()">Cancel</button>
@@ -305,11 +307,13 @@ const split=v=>v.split(",").map(s=>s.trim()).filter(Boolean);
 async function openProfile(){const {d:c}=await api("/config");CATS=c.categories||{};PAIN=c.pain_signals||{};
  $("profGrid").innerHTML=PROF.map(([k,l])=>'<label class="f">'+l+'<input type="text" id="p_'+k+'" value="'+esc(c[k])+'"></label>').join("");
  $("p_proof_point").value=c.proof_point||"";$("catGrid").innerHTML=listBox("cat",CATS);$("painGrid").innerHTML=listBox("pain",PAIN);
- $("p_small").value=(c.smallbiz_words||[]).join(", ");$("p_subs").value=(c.subreddits||[]).join(", ");$("p_excl").value=(c.exclude_words||[]).join(", ");profile.showModal();}
+ $("p_small").value=(c.smallbiz_words||[]).join(", ");$("p_subs").value=(c.subreddits||[]).join(", ");$("p_excl").value=(c.exclude_words||[]).join(", ");
+ $("p_fl").value=(c.freelancer_queries||[]).join(", ");$("p_reddit").checked=!!c.use_reddit;profile.showModal();}
 async function saveProfile(){const b={proof_point:$("p_proof_point").value};PROF.forEach(([k])=>b[k]=$("p_"+k).value);
  b.categories={};Object.keys(CATS).forEach((k,i)=>b.categories[k]=split($("cat"+i).value));
  b.pain_signals={};Object.keys(PAIN).forEach((k,i)=>b.pain_signals[k]=split($("pain"+i).value));
  b.smallbiz_words=split($("p_small").value);b.subreddits=split($("p_subs").value).map(s=>s.replace(/^r\//,""));b.exclude_words=split($("p_excl").value);
+ b.freelancer_queries=split($("p_fl").value);b.use_reddit=$("p_reddit").checked;
  await api("/config",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)});profile.close();}
 
 (async()=>{loadSaved();const {d}=await api("/status");

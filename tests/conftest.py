@@ -13,7 +13,7 @@ sys.path.insert(0, HERE)
 
 # Must be set before db / webapp are imported
 os.environ["SQLITE_PATH"] = os.path.join(tempfile.mkdtemp(), "test.db")
-os.environ.pop("DATABASE_URL", None)
+os.environ["DATABASE_URL"] = ""  # empty, so a developer's .env can't point tests at Supabase
 os.environ["APP_PASSWORD"] = "test"
 os.environ["CRON_TOKEN"] = "tok"
 
@@ -27,7 +27,7 @@ sh.time = types.SimpleNamespace(time=time.time, sleep=lambda s: None)
 
 @pytest.fixture
 def cfg():
-    return dict(sh.load_config(), delay_seconds=0)
+    return dict(sh.load_config(), delay_seconds=0, use_reddit=True)
 
 
 @pytest.fixture
