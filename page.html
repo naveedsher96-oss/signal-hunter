@@ -85,7 +85,8 @@ border-bottom:1px solid var(--line);flex-wrap:wrap}
 </style></head><body>
 <header><div><h1>Signal Hunter</h1>
 <p>Warm leads: companies, founders &amp; small businesses already asking for GHL, CRM, Sales, CS &amp; VA help</p></div>
-<div class="hbtns"><button class="hbtn" onclick="openHistory()">History</button>
+<div class="hbtns"><button class="hbtn" onclick="openPipeline()">Pipeline</button>
+<button class="hbtn" onclick="openHistory()">History</button>
 <button class="hbtn" onclick="openProfile()">Profile &amp; keywords</button>
 <a class="hbtn hidden" id="logout" href="/logout" style="color:#fff;text-decoration:none;border-radius:8px;font-weight:600">Log out</a></div></header>
 <main>
@@ -167,6 +168,14 @@ For Freelancer.com leads, bid on the project using the draft. For Reddit or Hack
  <h2 style="margin:0">Scan history</h2><button class="ghost" onclick="histDlg.close()">Close</button></div>
  <div id="histList" style="margin-top:10px"></div></dialog>
 
+<dialog id="pipeDlg"><div style="display:flex;justify-content:space-between;align-items:center">
+ <h2 style="margin:0">Your pipeline</h2><button class="ghost" onclick="pipeDlg.close()">Close</button></div>
+ <div id="pipeStats" class="stats"></div>
+ <h3 style="margin:14px 0 6px;font-size:15px">Follow-ups due</h3>
+ <div id="pipeDue"></div>
+ <h3 style="margin:14px 0 6px;font-size:15px">Active leads</h3>
+ <div id="pipeList"></div></dialog>
+
 <dialog id="profile">
  <h2 style="margin-top:0">Profile &amp; keywords</h2>
  <div class="grid" id="profGrid"></div>
@@ -190,7 +199,7 @@ For Freelancer.com leads, bid on the project using the draft. For Reddit or Hack
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const enc=encodeURIComponent;
-let FILE=null,timer=null,ROWS=[];
+let FILE=null,timer=null,ROWS=[],LSTATUS={};
 const FIELDS=[["company","Company (required)"],["website","Website"],["contact_name","Contact name"],
  ["contact_email","Contact email"],["ats_slug","Job board slug"]];
 if("{{LOGOUT}}")$("logout").classList.remove("hidden");
@@ -260,6 +269,7 @@ async function poll(){
 
 async function loadRun(id){
  const {ok,d}=await api("/runs/"+id);if(!ok)return;
+ const {d:ls}=await api("/lead-statuses");LSTATUS=ls||{};
  $("runCard").classList.remove("hidden");$("barWrap").classList.add("hidden");$("stopBtn").classList.add("hidden");
  if(d.status==="error"){$("runTitle").textContent=d.label+" ("+d.created+")";
   $("runMsg").innerHTML='<span class="err">'+esc(d.error||"Failed")+'</span>';ROWS=[];render();return}
@@ -272,17 +282,48 @@ async function loadRun(id){
  render();}
 
 function gmail(r){const e=r.email;return "https://mail.google.com/mail/?view=cm&fs=1&to="+enc(r.to||"")+"&su="+enc(e.subject)+"&body="+enc(e.body);}
+const ST_OPTS=[["","New"],["contacted","Contacted"],["replied","Replied"],["call","Call booked"],
+ ["proposal","Proposal sent"],["won","Won"],["dead","Dead"]];
+const stKey=r=>(r.company||"").toLowerCase();
+const today=()=>new Date().toISOString().slice(0,10);
+const daysSince=s=>s?(Date.now()-Date.parse(s+"T00:00:00"))/864e5:0;
+const followUpDue=s=>s&&s.status==="contacted"&&s.sent&&daysSince(s.sent)>=4;
+function statusCell(r,i){const k=stKey(r),st=LSTATUS[k]||{};
+ const opts=ST_OPTS.map(([v,l])=>'<option value="'+v+'"'+(st.status===v?' selected':'')+'>'+l+'</option>').join("");
+ return '<select onchange="setStatus('+i+',this.value)">'+opts+'</select>'+
+  (followUpDue(st)?'<div style="margin-top:4px"><span class="pill HOT">Follow up</span></div>':"")+
+  (st.sent?'<div class="muted" style="margin-top:4px">sent '+esc(st.sent)+'</div>':"");}
+async function setStatus(i,status){
+ const r=window._rows[i],k=stKey(r),old=LSTATUS[k]||{};
+ const sent=status==="contacted"?(old.sent||today()):(old.sent||"");
+ const {ok}=await api("/lead-status",{method:"POST",headers:{"Content-Type":"application/json"},
+  body:JSON.stringify({key:k,name:r.company,status,sent})});
+ if(ok){if(status)LSTATUS[k]={name:r.company,status,sent};else delete LSTATUS[k];render();}}
+async function openPipeline(){
+ const {d}=await api("/lead-statuses");const st=d||{};
+ const order=["contacted","replied","call","proposal","won","dead"];
+ const labels={contacted:"Contacted",replied:"Replied",call:"Call booked",proposal:"Proposal sent",won:"Won",dead:"Dead"};
+ const counts={};Object.values(st).forEach(s=>counts[s.status]=(counts[s.status]||0)+1);
+ $("pipeStats").innerHTML=order.map(k=>'<div class="stat"><b>'+(counts[k]||0)+'</b>'+labels[k]+'</div>').join("");
+ const due=Object.values(st).filter(followUpDue).sort((a,b)=>a.sent<b.sent?-1:1);
+ $("pipeDue").innerHTML=due.length?due.map(s=>'<div class="hist"><div><b>'+esc(s.name)+'</b>'+
+  '<div class="muted">sent '+esc(s.sent)+'</div></div></div>').join(""):'<p class="muted">None right now. Follow-ups appear 4 days after you mark a lead Contacted.</p>';
+ const act=Object.values(st).filter(s=>s.status!=="dead"&&s.status!=="won")
+  .sort((a,b)=>(a.updated<b.updated?1:-1));
+ $("pipeList").innerHTML=act.length?act.map(s=>'<div class="hist"><div><b>'+esc(s.name)+'</b>'+
+  '<div class="muted">'+labels[s.status]+'</div></div></div>').join(""):'<p class="muted">Nothing in progress yet. Mark a lead Contacted on the results table.</p>';
+ pipeDlg.showModal();}
 function render(){
  const order={HOT:0,WARM:1,COLD:2},ft=$("fTier").value,fn=$("fNeed").value,fnew=$("fNew").checked,fs=$("fSeg").value;
  const rows=ROWS.filter(r=>(!ft||r.tier===ft)&&(!fn||r.needs.includes(fn))&&(!fnew||r.new)&&(!fs||(fs==="small")===!!r.segment))
   .sort((a,b)=>order[a.tier]-order[b.tier]||b.score-a.score);
  window._rows=rows;
- $("results").innerHTML="<thead><tr><th>Lead</th><th>Tier</th><th>Score</th><th>Needs</th><th>Signals</th><th>Track</th><th>Evidence &amp; email</th></tr></thead><tbody>"+
+ $("results").innerHTML="<thead><tr><th>Lead</th><th>Tier</th><th>Score</th><th>Needs</th><th>Signals</th><th>Track</th><th>Status</th><th>Evidence &amp; email</th></tr></thead><tbody>"+
   rows.map((r,i)=>"<tr><td><b>"+esc(r.company)+"</b>"+(r.new?" <span class='pill NEW'>NEW</span>":"")+
    (r.segment?"<div style='margin-top:3px'><span class='pill SMALL'>Small business / founder</span></div>":"")+
    "<div class='muted'>"+esc(r.sources)+"</div></td><td data-l='Tier'><span class='pill "+r.tier+"'>"+r.tier+"</span></td>"+
    "<td data-l='Score' class='sc'>"+r.score+"</td><td data-l='Needs'>"+(r.needs.map(n=>"<span class='need'>"+esc(n)+"</span>").join("")||"-")+"</td>"+
-   "<td data-l='Signals'>"+r.count+(r.newest?" <span class='muted'>(latest "+esc(r.newest)+")</span>":"")+"</td><td data-l='Track'>"+esc(r.track)+"</td><td>"+
+   "<td data-l='Signals'>"+r.count+(r.newest?" <span class='muted'>(latest "+esc(r.newest)+")</span>":"")+"</td><td data-l='Track'>"+esc(r.track)+"</td><td data-l='Status'>"+statusCell(r,i)+"</td><td>"+
    "<ul class='sig'>"+r.signals.slice(0,3).map(s=>"<li><b>"+esc(s.label)+"</b> "+(s.date?"("+esc(s.date)+") ":"")+
     (s.url?"<a href='"+esc(s.url)+"' target='_blank' rel='noopener'>"+esc(s.detail)+"</a>":esc(s.detail))+"</li>").join("")+"</ul>"+
    (r.email?"<details><summary>View email draft</summary><pre id='e"+i+"'><b>Subject:</b> "+esc(r.email.subject)+"\n\n"+esc(r.email.body)+"</pre>"+

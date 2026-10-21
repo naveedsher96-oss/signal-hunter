@@ -184,7 +184,8 @@ def require_login():
     if session.get("ok"):
         return None
     if request.path.startswith(("/api/", "/runs", "/status", "/config", "/upload",
-                                "/paste", "/start", "/stop", "/saved-list")):
+                                "/paste", "/start", "/stop", "/saved-list",
+                                "/lead-status")):
         return jsonify(error="Please log in again."), 401
     return redirect(url_for("login"))
 
@@ -344,6 +345,32 @@ def saved_list():
     s = db.get_setting("saved_list") or {}
     return jsonify({"name": s.get("name"), "count": len(s.get("companies") or []),
                     "saved": s.get("saved")} if s.get("companies") else {})
+
+
+LEAD_STATUSES = {"contacted", "replied", "call", "proposal", "won", "dead"}
+
+
+@app.route("/lead-statuses", endpoint="lead_statuses")
+def lead_statuses():
+    return jsonify(db.get_lead_statuses())
+
+
+@app.route("/lead-status", methods=["POST"], endpoint="lead_status")
+def lead_status():
+    d = request.get_json(silent=True) or {}
+    key = (d.get("key") or "").strip().lower()[:200]
+    status = (d.get("status") or "").strip().lower()
+    name = (d.get("name") or key).strip()[:200]
+    if not key or (status and status not in LEAD_STATUSES):
+        return jsonify(error="Bad status"), 400
+    if not status:
+        db.clear_lead_status(key)
+        return jsonify(ok=True)
+    sent = (d.get("sent") or "").strip()[:10]
+    if status == "contacted" and not sent:
+        sent = db.now()[:10]
+    db.set_lead_status(key, name, status, sent, (d.get("note") or "")[:500])
+    return jsonify(ok=True)
 
 
 @app.route("/runs")
