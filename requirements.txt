@@ -2,4 +2,5 @@ flask==3.0.3
 gunicorn==23.0.0
 requests==2.32.3
 openpyxl==3.1.5
-psycopg[binary]==3.2.3
+# range, not a pin: newer Python versions need newer prebuilt wheels
+psycopg[binary]>=3.2.3,<3.4

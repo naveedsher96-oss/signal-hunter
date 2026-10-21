@@ -2,7 +2,9 @@
 Signal Hunter - web app
 
 Local:   python webapp.py            (opens http://127.0.0.1:8765, SQLite, no login)
-Online:  gunicorn webapp:app         (Render; Postgres via DATABASE_URL; password login)
+Server:  gunicorn webapp:app         (optional; Postgres via DATABASE_URL; password login)
+
+DATABASE_URL can also come from a local .env file (see db.load_env_file).
 
 Environment variables (all optional locally):
   APP_PASSWORD          password for the login page (login is off when not set)
@@ -37,7 +39,8 @@ CRON_TOKEN = os.environ.get("CRON_TOKEN", "")
 ALLOWED = (".xlsx", ".xlsm", ".csv")
 EDITABLE = {"your_name", "headline", "email", "linkedin", "portfolio", "years", "tools",
             "proof_point", "hiring_manager_titles", "lookback_days", "categories",
-            "subreddits", "pain_signals", "smallbiz_words", "exclude_words"}
+            "subreddits", "pain_signals", "smallbiz_words", "exclude_words",
+            "freelancer_queries", "use_reddit"}
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY") or secrets.token_hex(32)
@@ -74,7 +77,7 @@ def summarise(r):
             "segment": r.get("segment", ""), "count": r["intent_count"],
             "newest": r["newest"], "sources": r.get("sources", ""),
             "new": r.get("any_new", False), "to": c.get("contact_email", ""),
-            "person": c["company"].startswith(("Reddit ", "HN user ")),
+            "person": sh.is_person(c["company"]),
             "url": top["url"] if top else "", "email": r.get("email"),
             "signals": [{"label": s["label"], "detail": s["detail"], "url": s["url"],
                          "date": s["date"], "points": s["points"]}

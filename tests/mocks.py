@@ -45,6 +45,13 @@ R={
    {"objectID":"112","comment_text":"Freelancer | Virtual assistant | Remote | I offer admin help","story_title":"Ask HN: Freelancer? Seeking freelancer? (October 2026)","author":"me","created_at":iso(3)}]},
  "news.google.com/rss/search?q=%22Deel%22":"""<rss><channel><item><title>Deel hiring 200 customer success staff as it expands in Asia</title><link>https://news/1</link><pubDate>%s</pubDate></item>
  <item><title>Deel raises $300M Series E</title><link>https://news/2</link><pubDate>%s</pubDate></item></channel></rss>"""%(rfc(12),rfc(30)),
+ "freelancer.com/api/projects/0.1/projects/active/?query=gohighlevel":{"status":"success","result":{"projects":[
+   {"id":40778167,"title":"GoHighLevel Agency & Sub-Account Setup","seo_url":"go-high-level/GoHighLevel-Agency-Sub-Account-Setup","preview_description":"My agency runs on GoHighLevel and I need a specialist to set up pipelines","time_submitted":ep(2),"type":"hourly","currency":{"code":"USD"},"budget":{"minimum":10.0,"maximum":15.0},"bid_stats":{"bid_count":40}},
+   {"id":40778168,"title":"Logo for bakery","seo_url":"logo/Logo-for-bakery","preview_description":"Need a cute logo","time_submitted":ep(1),"type":"fixed","currency":{"code":"USD"},"budget":{"minimum":30.0,"maximum":50.0},"bid_stats":{"bid_count":90}},
+   {"id":40778169,"title":"Old GHL project","seo_url":"x/old","preview_description":"GoHighLevel funnels","time_submitted":ep(200),"type":"fixed","currency":{"code":"USD"},"budget":{"minimum":100.0,"maximum":200.0},"bid_stats":{"bid_count":5}}]}},
+ "freelancer.com/api/projects/0.1/projects/active/?query=crm":{"status":"success","result":{"projects":[
+   {"id":40778167,"title":"GoHighLevel Agency & Sub-Account Setup","seo_url":"go-high-level/GoHighLevel-Agency-Sub-Account-Setup","preview_description":"My agency runs on GoHighLevel and I need a specialist to set up pipelines","time_submitted":ep(2),"type":"hourly","currency":{"code":"USD"},"budget":{"minimum":10.0,"maximum":15.0},"bid_stats":{"bid_count":40}}]}},
+ "jobicy.com/api/v2/remote-jobs":{"jobs":[{"companyName":"Peak Roofing","jobTitle":"GoHighLevel Automation Specialist","jobGeo":"Anywhere","url":"https://jobicy.com/jobs/1","pubDate":iso(3)}]},
  "https://acmedental.com":"<html><script src='https://widgets.leadconnectorhq.com/loader.js'></script></html>",
  "https://zapier.com":"<html><script src='//js.hs-scripts.com/123.js'></script></html>",
 }

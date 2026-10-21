@@ -1,7 +1,8 @@
-# Runs "Find warm companies" + re-scans your saved list every Monday.
-# Needs two repository secrets (Settings > Secrets and variables > Actions):
-#   APP_URL     e.g. https://signal-hunter-xxxx.onrender.com
-#   CRON_TOKEN  copy it from Render > your service > Environment
+# Runs "Find warm companies" + re-scans your saved list every Monday, for free,
+# right here on GitHub. Results go to your Supabase database and appear under
+# History in the app on your computer.
+# Needs one repository secret (Settings > Secrets and variables > Actions):
+#   DATABASE_URL   your Supabase "Session pooler" connection string
 name: Weekly scan
 
 on:
@@ -14,29 +15,18 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
-      - name: Wake the app and start the scan
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Run the weekly scan
         env:
-          APP_URL: ${{ secrets.APP_URL }}
-          CRON_TOKEN: ${{ secrets.CRON_TOKEN }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          REDDIT_CLIENT_ID: ${{ secrets.REDDIT_CLIENT_ID }}
+          REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
         run: |
-          set -u
-          for i in 1 2 3 4 5 6; do
-            code=$(curl -s -o /tmp/out -w '%{http_code}' --max-time 90 \
-              -X POST -H "X-Cron-Token: $CRON_TOKEN" "$APP_URL/api/cron" || true)
-            echo "attempt $i -> HTTP $code: $(cat /tmp/out 2>/dev/null)"
-            if [ "$code" = "202" ] || [ "$code" = "409" ]; then break; fi
-            sleep 30
-          done
-          if [ "$code" != "202" ] && [ "$code" != "409" ]; then exit 1; fi
-
-      - name: Keep the app awake until the scan finishes
-        env:
-          APP_URL: ${{ secrets.APP_URL }}
-          CRON_TOKEN: ${{ secrets.CRON_TOKEN }}
-        run: |
-          for i in $(seq 1 55); do
-            s=$(curl -s --max-time 60 -H "X-Cron-Token: $CRON_TOKEN" "$APP_URL/api/cron/status" || true)
-            echo "$(date -u +%H:%M) $s"
-            echo "$s" | grep -q '"state":"running"' || { echo "Finished."; exit 0; }
-            sleep 60
-          done
+          if [ -z "$DATABASE_URL" ]; then
+            echo "Add the DATABASE_URL secret first (see README)."; exit 1
+          fi
+          python cron_scan.py

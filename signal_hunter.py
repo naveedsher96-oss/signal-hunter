@@ -7,11 +7,12 @@ virtual / admin assistance or data entry - and drafts an email that answers
 that need.
 
 Signals it collects (free, public sources only):
-  * Asking for help    - Reddit posts ([Hiring], "looking for a GHL expert"...),
-                         Hacker News comments and "Who is hiring" threads
+  * Asking for help    - Freelancer.com open projects, Hacker News comments and
+                         "Who is hiring" threads, Reddit posts (only with an
+                         approved Reddit API key and use_reddit on)
   * Job posts          - Greenhouse, Lever, Ashby, Workable, SmartRecruiters,
                          Recruitee boards + RemoteOK, Remotive, We Work Remotely,
-                         Himalayas remote feeds
+                         Himalayas, Jobicy remote feeds
   * Tools they use     - GoHighLevel / HubSpot / Zoho / Salesforce... on their site
   * News               - hiring news, funding, new sales leaders, CRM rollouts
 Each signal is weighted by how recent it is.
@@ -132,6 +133,10 @@ SEG_SMALL = "Small business / founder"
 DEFAULT_EXCLUDE = ["looking for work", "looking for a job", "looking for job",
                    "open to work", "job hunting", "job seeker", "my resume", "my cv",
                    "hire me", "i can help you", "offering my services"]
+# Freelancer.com searches: public project posts from people paying for this work
+DEFAULT_FREELANCER_QUERIES = ["gohighlevel", "crm", "hubspot", "zoho", "salesforce admin",
+                              "zapier", "virtual assistant", "data entry",
+                              "appointment setter", "lead generation", "customer support"]
 DEFAULT_HN_KEYWORDS = ["gohighlevel", "virtual assistant", "crm", "revops",
                        "sales operations", "customer success", "data entry", "hubspot",
                        "salesforce admin", "zoho", "business development"]
@@ -353,6 +358,8 @@ def with_defaults(cfg):
     cfg.setdefault("pain_signals", DEFAULT_PAIN)
     cfg.setdefault("smallbiz_words", DEFAULT_SMALLBIZ)
     cfg.setdefault("exclude_words", DEFAULT_EXCLUDE)
+    cfg.setdefault("freelancer_queries", DEFAULT_FREELANCER_QUERIES)
+    cfg.setdefault("use_reddit", False)  # Reddit needs an approved API key; off until then
     cfg.setdefault("delay_seconds", 1)
     return cfg
 
@@ -625,8 +632,19 @@ def feed_himalayas():
     return out
 
 
+def feed_jobicy():
+    # Jobicy asks to be credited with a link to the original post; we always link it
+    d = http_get("https://jobicy.com/api/v2/remote-jobs?count=100")
+    if not d or "jobs" not in d:
+        return []
+    return [{"company": j.get("companyName", ""), **_job(
+        j.get("jobTitle"), j.get("jobGeo") or "Worldwide", "Remote", j.get("url"),
+        j.get("pubDate")), "source": "Jobicy"} for j in d["jobs"]]
+
+
 FEEDS = [("RemoteOK", feed_remoteok), ("Remotive", feed_remotive),
-         ("We Work Remotely", feed_wwr), ("Himalayas", feed_himalayas)]
+         ("We Work Remotely", feed_wwr), ("Himalayas", feed_himalayas),
+         ("Jobicy", feed_jobicy)]
 
 
 def load_feeds(on_step=None):
@@ -687,6 +705,26 @@ def reddit_posts(path):
                     "url": "https://www.reddit.com" + p.get("permalink", ""),
                     "date": to_date(p.get("created_utc")), "sub": p.get("subreddit", ""),
                     "author": p.get("author", ""), "flair": p.get("link_flair_text") or ""})
+    return out
+
+
+def freelancer_projects(query, n=50):
+    """Open Freelancer.com projects (public API, no key): people paying for the work."""
+    q = urllib.parse.quote(query)
+    d = http_get(f"https://www.freelancer.com/api/projects/0.1/projects/active/?query={q}"
+                 f"&limit={n}&sort_field=time_updated")
+    out = []
+    for p in ((d or {}).get("result") or {}).get("projects") or []:
+        b = p.get("budget") or {}
+        cur = (p.get("currency") or {}).get("code") or ""
+        budget = (f"{cur} {b.get('minimum'):g}-{b.get('maximum'):g}"
+                  f"{'/hr' if p.get('type') == 'hourly' else ''}"
+                  if b.get("minimum") and b.get("maximum") else "")
+        out.append({"id": p.get("id"), "title": p.get("title") or "",
+                    "text": p.get("preview_description") or "",
+                    "url": f"https://www.freelancer.com/projects/{p.get('seo_url', '')}",
+                    "date": to_date(p.get("time_submitted")), "budget": budget,
+                    "bids": (p.get("bid_stats") or {}).get("bid_count")})
     return out
 
 
@@ -972,7 +1010,8 @@ def scan_company(c, cfg, m, feed_jobs):
     matched = [j for j in feed_jobs if same_company(j["company"], c["company"])]
     for src in {j["source"] for j in matched}:
         events += job_events([j for j in matched if j["source"] == src], cats, src, lb)
-    events += reddit_company(c["company"], m, lb)
+    if cfg.get("use_reddit"):
+        events += reddit_company(c["company"], m, lb)
     events += hn_company(c["company"], m, lb)
     events += news_events(c["company"], cats, lb)
     events += site_events(c, cats)
@@ -1009,8 +1048,9 @@ def discover(cfg, on_progress=None, should_stop=lambda: False):
     cats = m.cats
     lb = cfg["lookback_days"]
     since = int((datetime.now() - timedelta(days=lb)).timestamp())
-    subs, kws = cfg["subreddits"], cfg["hn_keywords"]
-    total = len(FEEDS) + len(subs) + len(kws)
+    subs = cfg["subreddits"] if cfg.get("use_reddit") else []
+    kws, fl = cfg["hn_keywords"], cfg.get("freelancer_queries") or []
+    total = len(FEEDS) + len(subs) + len(kws) + len(fl)
     done = [0]
     groups = {}
 
@@ -1060,7 +1100,32 @@ def discover(cfg, on_progress=None, should_stop=lambda: False):
                 contact=p["url"])
         time.sleep(max(2, cfg.get("delay_seconds", 1)))  # be polite to Reddit
 
-    # 3. Hacker News: Who is hiring + asks
+    # 3. Freelancer.com: open projects (people already paying for this work)
+    seen_projects = set()
+    for query in fl:
+        if should_stop():
+            break
+        step(f"Freelancer.com: {query}")
+        for p in freelancer_projects(query):
+            if p["id"] in seen_projects or not in_window(p["date"], lb):
+                continue
+            seen_projects.add(p["id"])
+            full = f"{p['title']} {p['text']}"
+            if OFFER_RE.search(full) or (m.exclude and m.exclude.search(full)):
+                continue
+            need = (categorize(full, cats) or m.pains(full) or [None])[0]
+            if not need:
+                continue
+            bids = f"{p['bids']} bids" if p["bids"] is not None else ""
+            extra = ", ".join(x for x in (p["budget"], bids) if x)
+            add(f"Freelancer.com project #{p['id']}",
+                ev("ask", need, "Freelancer.com", p["title"], p["url"], p["date"],
+                   f"Freelancer.com: {p['title']}" + (f" ({extra})" if extra else ""),
+                   segment=m.segment(full), post=p["text"][:600]),
+                contact=p["url"])
+        time.sleep(cfg.get("delay_seconds", 1))
+
+    # 4. Hacker News: Who is hiring + asks
     for kw in kws:
         if should_stop():
             break
@@ -1155,16 +1220,24 @@ PAIN_OPENER = {
 }
 
 
+PERSON_PREFIXES = ("Reddit ", "HN user ", "Freelancer.com ")
+
+
+def is_person(name):
+    """Leads that are a single post (reply on the post) rather than a company."""
+    return (name or "").startswith(PERSON_PREFIXES)
+
+
 def first_name(full):
     return full.split()[0] if full else ""
 
 
 def build_email(cfg, company, result):
     name = company["company"]
-    is_person = name.startswith(("Reddit ", "HN user "))
-    display = "your team" if is_person else name
+    person = is_person(name)
+    display = "your team" if person else name
     hello = (f"Hi {first_name(company['contact_name'])}," if company.get("contact_name")
-             else "Hi there," if is_person else "Hi [First name],")
+             else "Hi there," if person else "Hi [First name],")
     sig = (f"\n\nBest regards,\n{cfg['your_name']}\n{cfg['headline']}\n{cfg['email']}"
            + (f"\n{cfg['linkedin']}" if cfg.get("linkedin") else "")
            + (f"\n{cfg['portfolio']}" if cfg.get("portfolio") else ""))
@@ -1202,7 +1275,7 @@ def build_email(cfg, company, result):
         return subject, body + sig
 
     if kind == "ask":
-        if is_person:
+        if person:
             subject = f"Re: your post - {phrase}"
             opener = (f"I saw your recent post (\"{top['title'][:90]}\") and this is "
                       f"exactly the kind of work I do.")
@@ -1211,7 +1284,7 @@ def build_email(cfg, company, result):
             opener = (f"I noticed {name} has recently been looking for help with {phrase}. "
                       f"That's exactly the kind of work I do.")
     elif kind == "struggle":
-        if is_person:
+        if person:
             sub = top["source"].replace("Reddit ", "") if top["source"].startswith(
                 "Reddit") else "the community"
             where = f"I came across your recent post in {sub}."
@@ -1338,8 +1411,8 @@ def write_outputs(cfg, results, label="List", seen=None, out_dir=None, emails=Tr
         r["any_new"] = any_new
 
         top = r["signals"][0] if r["signals"] else None
-        is_person = c["company"].startswith(("Reddit ", "HN user "))
-        li = "" if is_person else ("https://www.linkedin.com/search/results/people/?keywords="
+        person = is_person(c["company"])
+        li = "" if person else ("https://www.linkedin.com/search/results/people/?keywords="
                                    + urllib.parse.quote(f"{c['company']} " + cfg.get(
                                        "hiring_manager_titles", "Head of Sales")))
         leads.append([c["company"], r["tier"], r["score"], r["track"],
@@ -1349,7 +1422,7 @@ def write_outputs(cfg, results, label="List", seen=None, out_dir=None, emails=Tr
                       f"{top['label']}: {top['detail']}" if top else "No signals found",
                       top["url"] if top else "", "NEW" if any_new else "", r["sources"],
                       c.get("contact_name", ""), c.get("contact_email", ""),
-                      "Reply on the post" if is_person else "Search LinkedIn",
+                      "Reply on the post" if person else "Search LinkedIn",
                       "To contact" if r["tier"] != "COLD" else "Parked", "", "", ""])
         row = leads.max_row
         leads.cell(row, 2).fill = PatternFill("solid", fgColor=TIER_FILL[r["tier"]])
@@ -1364,7 +1437,7 @@ def write_outputs(cfg, results, label="List", seen=None, out_dir=None, emails=Tr
             subject, body = build_email(cfg, c, r)
             r["email"] = {"subject": subject, "body": body}
             em_ws.append([c["company"], r["tier"], c.get("contact_email") or (
-                "Reply on the post" if is_person else "[add email]"), subject, body])
+                "Reply on the post" if person else "[add email]"), subject, body])
             em_ws.cell(em_ws.max_row, 5).alignment = Alignment(wrap_text=True,
                                                                vertical="top")
             if not emails:

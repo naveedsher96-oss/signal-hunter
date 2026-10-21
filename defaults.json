@@ -80,6 +80,7 @@
       "back office"
     ]
   },
+  "use_reddit": false,
   "subreddits": [
     "forhire",
     "hiring",
@@ -115,6 +116,19 @@
     "salesforce admin",
     "zoho",
     "business development"
+  ],
+  "freelancer_queries": [
+    "gohighlevel",
+    "crm",
+    "hubspot",
+    "zoho",
+    "salesforce admin",
+    "zapier",
+    "virtual assistant",
+    "data entry",
+    "appointment setter",
+    "lead generation",
+    "customer support"
   ],
   "pain_signals": {
     "Virtual / Admin Assistant": [

@@ -16,6 +16,20 @@ import sqlite3
 import threading
 from datetime import datetime
 
+def load_env_file(path=os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")):
+    """KEY=VALUE lines from a local .env file (never committed). Real environment
+    variables win. Lets "Run locally.bat" use the shared Supabase database."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                k, sep, v = line.strip().partition("=")
+                if sep and k and not k.startswith("#"):
+                    os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
+    except OSError:
+        pass
+
+
+load_env_file()
 URL = os.environ.get("DATABASE_URL", "").strip()
 IS_PG = URL.startswith(("postgres://", "postgresql://"))
 SQLITE_PATH = os.environ.get("SQLITE_PATH",

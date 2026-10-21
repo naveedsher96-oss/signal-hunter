@@ -112,3 +112,34 @@ def test_discover_tiers_are_spread(cfg):
     tiers = [r["tier"] for r in sh.discover(cfg)]
     assert "HOT" in tiers and "WARM" in tiers
     assert tiers.count("HOT") < len(tiers) / 2
+
+
+def test_freelancer_and_jobicy_leads(cfg):
+    results = {r["company"]["company"]: r for r in sh.discover(cfg)}
+    fl = results["Freelancer.com project #40778167"]  # found by two queries, listed once
+    assert fl["signals"][0]["kind"] == "ask" and fl["needs"][0] == "GoHighLevel"
+    assert len(fl["signals"]) == 1 and "USD 10-15/hr" in fl["signals"][0]["detail"]
+    assert "Freelancer.com project #40778168" not in results  # logo job: not our service
+    assert "Freelancer.com project #40778169" not in results  # outside lookback window
+    assert "Peak Roofing" in results  # Jobicy feed
+    assert sh.is_person("Freelancer.com project #1") and not sh.is_person("Peak Roofing")
+
+
+def test_reddit_is_off_by_default(cfg):
+    off = dict(cfg)
+    del off["use_reddit"]
+    names = {r["company"]["company"] for r in sh.discover(sh.with_defaults(off))}
+    assert not any(n.startswith("Reddit ") for n in names)
+    assert any(n.startswith("Reddit ") for n in {r["company"]["company"]
+                                                 for r in sh.discover(cfg)})
+
+
+def test_env_file_loader(tmp_path, monkeypatch):
+    import db
+    f = tmp_path / ".env"
+    f.write_text('# comment\nSH_TEST_A="one"\nSH_TEST_B=two\nnot a pair\n')
+    monkeypatch.setenv("SH_TEST_B", "already set")
+    db.load_env_file(str(f))
+    assert os.environ["SH_TEST_A"] == "one"
+    assert os.environ["SH_TEST_B"] == "already set"
+    monkeypatch.delenv("SH_TEST_A")
