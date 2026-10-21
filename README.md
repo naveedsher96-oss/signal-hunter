@@ -6,7 +6,7 @@ Signal Hunter finds companies, small-business owners and new founders who have *
 **Nothing is ever sent automatically.** You review each draft, then send it with **Open in Gmail** or reply on the post.
 
 ## What it does
-- **Scan my list:** upload an Excel or CSV file, or paste company names. You can save the list as your **weekly list**, which is re-scanned every Monday.
+- **Scan my list:** upload an Excel or CSV file, or paste company names. You can save the list as your **saved list**, which is re-scanned every day.
 - **Find warm companies:** no list needed. It finds open Freelancer.com projects, Hacker News posts asking for help, and remote job posts. Reddit can be switched on once you have an API key.
 - **History:** every scan is saved, and each one comes with an Excel tracker to download.
 
@@ -19,7 +19,7 @@ Signals, points and keywords are explained in the app under **Profile & keywords
 Everything here is free and none of it asks for a payment card:
 
 - **Supabase** stores your scans, history and settings.
-- **GitHub Actions** runs the scan every Monday, right here in this repository.
+- **GitHub Actions** runs the scan every morning, right here in this repository.
 - **Your computer** runs the app itself when you want to look at leads or start a scan.
 
 ### 1. Database: Supabase
@@ -31,14 +31,14 @@ Everything here is free and none of it asks for a payment card:
 
 The app creates its tables by itself on first start.
 
-> Supabase pauses free projects after about 7 days without activity. The Monday scan keeps it awake. If it ever does pause, open the project in Supabase and click **Restore**.
+> Supabase pauses free projects after about 7 days without activity. The daily scan keeps it awake. If it ever does pause, open the project in Supabase and click **Restore**.
 
-### 2. Weekly automatic scan: GitHub
+### 2. Daily automatic scan: GitHub
 1. In GitHub, open this repository → **Settings → Secrets and variables → Actions → New repository secret**.
 2. Name: `DATABASE_URL`. Secret: the string from step 1. Click **Add secret**.
-3. Test it: open the **Actions** tab → **Weekly scan** → **Run workflow**. It takes a few minutes, and the run turns green when it's done.
+3. Test it: open the **Actions** tab → **Daily scan** → **Run workflow**. It takes a few minutes, and the run turns green when it's done.
 
-From then on, the scan runs every **Monday at 8:00 AM Pakistan time**.
+From then on, the scan runs every **day at 8:00 AM Pakistan time**.
 
 > GitHub pauses scheduled runs if a repository has had no activity for 60 days. If that happens, re-enable the workflow in the Actions tab.
 
@@ -47,7 +47,7 @@ From then on, the scan runs every **Monday at 8:00 AM Pakistan time**.
 2. Download this repository (green **Code** button → **Download ZIP**) and unzip it.
 3. In that folder, create a text file named `.env` (no other name, no `.txt`) containing one line:
    `DATABASE_URL=` followed by your string from step 1.
-4. Double-click **`Run locally.bat`**. It opens http://127.0.0.1:8765 in your browser, with your Monday scans under **History**.
+4. Double-click **`Run locally.bat`**. It opens http://127.0.0.1:8765 in your browser, with your daily scans under **History**.
 
 Without a `.env` file the app still works, but it keeps its data in a local `signal_hunter.db` file instead of Supabase.
 
@@ -60,10 +60,10 @@ Reddit needs an approved API key. Once Reddit approves yours, add `REDDIT_CLIENT
 | File | What it is |
 |---|---|
 | `signal_hunter.py` | The scanning engine: sources, signal rules, scoring, email drafts, Excel export. It also works as a CLI: `python signal_hunter.py list.xlsx` or `--discover` |
-| `webapp.py` | Flask web app: login, API routes, background scan jobs, weekly cron endpoint |
+| `webapp.py` | Flask web app: login, API routes, background scan jobs, cron endpoint |
 | `db.py` | Storage. SQLite locally, Postgres when `DATABASE_URL` is set |
 | `page.html`, `login.html` | The interface (plain HTML and JS) |
 | `defaults.json` | Default profile and keywords (copied into the database on first run) |
-| `cron_scan.py` | The Monday scan without a web server (what GitHub Actions runs) |
-| `.github/workflows/weekly-scan.yml` | Monday scan on GitHub Actions |
+| `cron_scan.py` | The daily scan without a web server (what GitHub Actions runs) |
+| `.github/workflows/daily-scan.yml` | Daily scan on GitHub Actions |
 | `tests/` | Automated tests (`python -m pytest -q tests`) and an offline UI harness with fake sources: `APP_PASSWORD=test CRON_TOKEN=tok python tests/run_mock_server.py` |

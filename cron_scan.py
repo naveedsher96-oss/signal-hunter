@@ -1,8 +1,8 @@
 """
-Weekly scan without a web server (runs in GitHub Actions, free).
+Daily scan without a web server (runs in GitHub Actions, free).
 
 Does what the app's /api/cron endpoint does: "Find warm companies" plus a re-scan of
-your saved weekly list, and stores both in the database (DATABASE_URL = Supabase),
+your saved list, and stores both in the database (DATABASE_URL = Supabase),
 so they show up under History in the app on your computer.
 
     python cron_scan.py
@@ -14,10 +14,10 @@ import webapp
 
 
 def main():
-    tasks = [("discover", [], "Weekly: Find warm companies")]
+    tasks = [("discover", [], "Daily: Find warm companies")]
     saved = webapp.saved_list_task()
     if saved:
-        tasks.append((saved[0], saved[1], "Weekly: " + saved[2].replace("Weekly list: ", "")))
+        tasks.append((saved[0], saved[1], "Daily: " + saved[2].replace("Saved list: ", "")))
     ok = True
     for mode, companies, label in tasks:
         print(f"== {label}", flush=True)

@@ -10,7 +10,7 @@ Environment variables (all optional locally):
   APP_PASSWORD          password for the login page (login is off when not set)
   SECRET_KEY            signs the login cookie
   DATABASE_URL          Postgres connection string (Supabase "Session pooler" URI)
-  CRON_TOKEN            secret the weekly GitHub Action sends to /api/cron
+  CRON_TOKEN            secret the scheduled GitHub Action sends to /api/cron
   REDDIT_CLIENT_ID      free Reddit "script" app - keeps Reddit working on servers
   REDDIT_CLIENT_SECRET
 """
@@ -169,7 +169,7 @@ def start_job(tasks):
 def saved_list_task():
     saved = db.get_setting("saved_list")
     if saved and saved.get("companies"):
-        return ("list", saved["companies"], f"Weekly list: {saved.get('name', 'saved')}")
+        return ("list", saved["companies"], f"Saved list: {saved.get('name', 'saved')}")
     return None
 
 # -------------------------------------------------------------------- auth --
@@ -379,10 +379,10 @@ def _cron_ok():
 def cron():
     if not _cron_ok():
         return jsonify(error="Bad token"), 403
-    tasks = [("discover", [], "Weekly: Find warm companies")]
+    tasks = [("discover", [], "Daily: Find warm companies")]
     t = saved_list_task()
     if t:
-        tasks.append((t[0], t[1], "Weekly: " + t[2].replace("Weekly list: ", "")))
+        tasks.append((t[0], t[1], "Daily: " + t[2].replace("Saved list: ", "")))
     if not start_job(tasks):
         return jsonify(started=False, reason="A scan is already running."), 409
     return jsonify(started=True, scans=len(tasks)), 202

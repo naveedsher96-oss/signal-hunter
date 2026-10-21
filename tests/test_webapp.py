@@ -61,5 +61,5 @@ def test_cron_scan_script_stores_runs():
     before = len(webapp.db.list_runs(100))
     assert cron_scan.main() == 0
     runs = webapp.db.list_runs(100)
-    assert len(runs) == before + 1 and runs[0]["label"] == "Weekly: Find warm companies"
+    assert len(runs) == before + 1 and runs[0]["label"] == "Daily: Find warm companies"
     assert runs[0]["status"] == "done"
