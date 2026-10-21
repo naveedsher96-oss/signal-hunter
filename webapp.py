@@ -37,7 +37,7 @@ CRON_TOKEN = os.environ.get("CRON_TOKEN", "")
 ALLOWED = (".xlsx", ".xlsm", ".csv")
 EDITABLE = {"your_name", "headline", "email", "linkedin", "portfolio", "years", "tools",
             "proof_point", "hiring_manager_titles", "lookback_days", "categories",
-            "subreddits", "pain_signals", "smallbiz_words"}
+            "subreddits", "pain_signals", "smallbiz_words", "exclude_words"}
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY") or secrets.token_hex(32)
