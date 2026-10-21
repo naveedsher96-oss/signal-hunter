@@ -81,6 +81,13 @@
     ]
   },
   "use_reddit": false,
+  "find_contacts": true,
+  "contact_limit": 20,
+  "use_craigslist": true,
+  "craigslist_cities": ["newyork", "sfbay", "losangeles", "chicago", "boston",
+                      "austin", "seattle", "denver"],
+  "craigslist_queries": ["virtual assistant", "crm", "data entry",
+                         "appointment setter"],
   "subreddits": [
     "forhire",
     "hiring",

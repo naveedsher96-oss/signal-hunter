@@ -10,7 +10,7 @@ Environment variables (all optional locally):
   APP_PASSWORD          password for the login page (login is off when not set)
   SECRET_KEY            signs the login cookie
   DATABASE_URL          Postgres connection string (Supabase "Session pooler" URI)
-  CRON_TOKEN            secret the weekly GitHub Action sends to /api/cron
+  CRON_TOKEN            secret the scheduled GitHub Action sends to /api/cron
   REDDIT_CLIENT_ID      free Reddit "script" app - keeps Reddit working on servers
   REDDIT_CLIENT_SECRET
 """
@@ -169,7 +169,7 @@ def start_job(tasks):
 def saved_list_task():
     saved = db.get_setting("saved_list")
     if saved and saved.get("companies"):
-        return ("list", saved["companies"], f"Weekly list: {saved.get('name', 'saved')}")
+        return ("list", saved["companies"], f"Saved list: {saved.get('name', 'saved')}")
     return None
 
 # -------------------------------------------------------------------- auth --
@@ -184,7 +184,8 @@ def require_login():
     if session.get("ok"):
         return None
     if request.path.startswith(("/api/", "/runs", "/status", "/config", "/upload",
-                                "/paste", "/start", "/stop", "/saved-list")):
+                                "/paste", "/start", "/stop", "/saved-list",
+                                "/lead-status")):
         return jsonify(error="Please log in again."), 401
     return redirect(url_for("login"))
 
@@ -346,6 +347,32 @@ def saved_list():
                     "saved": s.get("saved")} if s.get("companies") else {})
 
 
+LEAD_STATUSES = {"contacted", "replied", "call", "proposal", "won", "dead"}
+
+
+@app.route("/lead-statuses", endpoint="lead_statuses")
+def lead_statuses():
+    return jsonify(db.get_lead_statuses())
+
+
+@app.route("/lead-status", methods=["POST"], endpoint="lead_status")
+def lead_status():
+    d = request.get_json(silent=True) or {}
+    key = (d.get("key") or "").strip().lower()[:200]
+    status = (d.get("status") or "").strip().lower()
+    name = (d.get("name") or key).strip()[:200]
+    if not key or (status and status not in LEAD_STATUSES):
+        return jsonify(error="Bad status"), 400
+    if not status:
+        db.clear_lead_status(key)
+        return jsonify(ok=True)
+    sent = (d.get("sent") or "").strip()[:10]
+    if status == "contacted" and not sent:
+        sent = db.now()[:10]
+    db.set_lead_status(key, name, status, sent, (d.get("note") or "")[:500])
+    return jsonify(ok=True)
+
+
 @app.route("/runs")
 def runs():
     return jsonify(db.list_runs(int(request.args.get("limit", 30))))
@@ -379,10 +406,10 @@ def _cron_ok():
 def cron():
     if not _cron_ok():
         return jsonify(error="Bad token"), 403
-    tasks = [("discover", [], "Weekly: Find warm companies")]
+    tasks = [("discover", [], "Daily: Find warm companies")]
     t = saved_list_task()
     if t:
-        tasks.append((t[0], t[1], "Weekly: " + t[2].replace("Weekly list: ", "")))
+        tasks.append((t[0], t[1], "Daily: " + t[2].replace("Saved list: ", "")))
     if not start_job(tasks):
         return jsonify(started=False, reason="A scan is already running."), 409
     return jsonify(started=True, scans=len(tasks)), 202

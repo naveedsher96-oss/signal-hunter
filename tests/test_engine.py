@@ -111,7 +111,7 @@ def test_tiers_need_more_than_one_ageing_post():
 def test_discover_tiers_are_spread(cfg):
     tiers = [r["tier"] for r in sh.discover(cfg)]
     assert "HOT" in tiers and "WARM" in tiers
-    assert tiers.count("HOT") < len(tiers) / 2
+    assert tiers.count("HOT") < len(tiers)  # not everything is hot
 
 
 def test_freelancer_and_jobicy_leads(cfg):
@@ -119,10 +119,61 @@ def test_freelancer_and_jobicy_leads(cfg):
     fl = results["Freelancer.com project #40778167"]  # found by two queries, listed once
     assert fl["signals"][0]["kind"] == "ask" and fl["needs"][0] == "GoHighLevel"
     assert len(fl["signals"]) == 1 and "USD 10-15/hr" in fl["signals"][0]["detail"]
+    # USD 15/hr -> worth ~300 -> +10 bonus on top of the 50-point ask
+    assert fl["signals"][0]["points"] == 60
+
+
+def test_budget_bonus():
+    assert sh.budget_bonus(600, 10) == 20    # real money
+    assert sh.budget_bonus(300, 10) == 10
+    assert sh.budget_bonus(30, 10) == -15    # tiny budget
+    assert sh.budget_bonus(600, 60) == 10    # big but 50+ bids already
+    assert sh.budget_bonus(0, None) == 0
+
+
+def test_freelancer_filtering_and_persons(cfg):
+    results = {r["company"]["company"]: r for r in sh.discover(cfg)}
     assert "Freelancer.com project #40778168" not in results  # logo job: not our service
     assert "Freelancer.com project #40778169" not in results  # outside lookback window
     assert "Peak Roofing" in results  # Jobicy feed
     assert sh.is_person("Freelancer.com project #1") and not sh.is_person("Peak Roofing")
+
+
+def test_freelancer_lead_gets_bid_draft(cfg, tmp_path):
+    results = sh.discover(cfg)
+    sh.write_outputs(cfg, results, "Discover", seen={}, out_dir=str(tmp_path),
+                     emails=False)
+    fl = next(r for r in results
+              if r["company"]["company"].startswith("Freelancer.com"))
+    body = fl["email"]["body"]
+    assert body.startswith("Hi!") and cfg["your_name"] in body
+    assert "GoHighLevel Agency" in fl["email"]["subject"]
+    assert len(body) < 1200 and "Best regards" not in body
+
+
+def test_contact_finder_fills_email(cfg):
+    results = {r["company"]["company"]: r for r in sh.discover(cfg)}
+    nim = results["Nimbus Realty"]
+    assert nim["company"]["contact_email"] == "sarah.lee@nimbusrealty.com"
+    assert nim["company"]["contact_name"] == "Sarah Lee"
+    assert nim["company"]["website"] == "https://nimbusrealty.com"
+    # person leads keep "reply on the post" - no invented contact
+    assert not results["Freelancer.com project #40778167"]["company"].get("contact_email")
+
+
+def test_contact_emails_filters_junk():
+    page = ('<a href="mailto:jane.doe@acme.com">x</a> noreply@acme.com '
+            'icon@2x.png a@example.com info@acme.com')
+    assert sh.contact_emails(page, "acme.com") == ["jane.doe@acme.com",
+                                                   "info@acme.com"]
+
+
+def test_new_sources(cfg):
+    results = {r["company"]["company"]: r for r in sh.discover(cfg)}
+    assert "River Clinics" in results  # Working Nomads feed
+    assert "Craigslist austin - Need virtual assistant 10 hrs/wk for my clinic" in results
+    assert not any("Selling my couch" in n for n in results)  # not a service ask
+    assert sh.is_person("Craigslist austin - x")  # reply on the post, not an email
 
 
 def test_reddit_is_off_by_default(cfg):

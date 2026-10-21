@@ -1,13 +1,13 @@
-# Runs "Find warm companies" + re-scans your saved list every Monday, for free,
+# Runs "Find warm companies" + re-scans your saved list every day, for free,
 # right here on GitHub. Results go to your Supabase database and appear under
 # History in the app on your computer.
 # Needs one repository secret (Settings > Secrets and variables > Actions):
 #   DATABASE_URL   your Supabase "Session pooler" connection string
-name: Weekly scan
+name: Daily scan
 
 on:
   schedule:
-    - cron: "0 3 * * 1"   # Mondays 03:00 UTC = 08:00 in Pakistan
+    - cron: "0 3 * * *"   # Daily 03:00 UTC = 08:00 in Pakistan
   workflow_dispatch: {}    # lets you run it by hand from the Actions tab
 
 jobs:
@@ -20,7 +20,7 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -r requirements.txt
-      - name: Run the weekly scan
+      - name: Run the daily scan
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           REDDIT_CLIENT_ID: ${{ secrets.REDDIT_CLIENT_ID }}

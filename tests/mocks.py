@@ -52,8 +52,21 @@ R={
  "freelancer.com/api/projects/0.1/projects/active/?query=crm":{"status":"success","result":{"projects":[
    {"id":40778167,"title":"GoHighLevel Agency & Sub-Account Setup","seo_url":"go-high-level/GoHighLevel-Agency-Sub-Account-Setup","preview_description":"My agency runs on GoHighLevel and I need a specialist to set up pipelines","time_submitted":ep(2),"type":"hourly","currency":{"code":"USD"},"budget":{"minimum":10.0,"maximum":15.0},"bid_stats":{"bid_count":40}}]}},
  "jobicy.com/api/v2/remote-jobs":{"jobs":[{"companyName":"Peak Roofing","jobTitle":"GoHighLevel Automation Specialist","jobGeo":"Anywhere","url":"https://jobicy.com/jobs/1","pubDate":iso(3)}]},
+ "workingnomads.com/api/exposed_jobs":[{"company_name":"River Clinics","title":"Zoho CRM Administrator","location":"Worldwide","url":"https://wn/1","pub_date":iso(3)}],
+ "austin.craigslist.org/search/ggg?format=rss&query=virtual%20assistant":"""<rss><channel>
+  <item><title>Need virtual assistant 10 hrs/wk for my clinic</title>
+   <link>https://austin.craigslist.org/ggg/123.html</link><pubDate>%s</pubDate>
+   <description>Looking for a VA to handle inbox, scheduling and data entry.</description></item>
+  <item><title>Selling my couch</title>
+   <link>https://austin.craigslist.org/ggg/124.html</link><pubDate>%s</pubDate>
+   <description>Good condition, pick up only.</description></item></channel></rss>"""%(rfc(2),rfc(2)),
  "https://acmedental.com":"<html><script src='https://widgets.leadconnectorhq.com/loader.js'></script></html>",
  "https://zapier.com":"<html><script src='//js.hs-scripts.com/123.js'></script></html>",
+ "https://nimbusrealty.com":"""<html><title>Nimbus Realty - homes in Portland</title>
+   <a href="/contact">Contact us</a></html>""",
+ "https://nimbusrealty.com/contact":"""<html>Nimbus Realty - reach Sarah:
+   <a href="mailto:sarah.lee@nimbusrealty.com">email</a> or info@nimbusrealty.com.
+   Automated mail: noreply@nimbusrealty.com. Tracking pixel icon@2x.png</html>""",
 }
 CALLS=[]
 def http_get(url, as_json=True, headers=None):

@@ -134,6 +134,10 @@ DEFAULT_EXCLUDE = ["looking for work", "looking for a job", "looking for job",
                    "open to work", "job hunting", "job seeker", "my resume", "my cv",
                    "hire me", "i can help you", "offering my services"]
 # Freelancer.com searches: public project posts from people paying for this work
+DEFAULT_CRAIGS_CITIES = ["newyork", "sfbay", "losangeles", "chicago", "boston",
+                         "austin", "seattle", "denver"]
+DEFAULT_CRAIGS_QUERIES = ["virtual assistant", "crm", "data entry",
+                          "appointment setter"]
 DEFAULT_FREELANCER_QUERIES = ["gohighlevel", "crm", "hubspot", "zoho", "salesforce admin",
                               "zapier", "virtual assistant", "data entry",
                               "appointment setter", "lead generation", "customer support"]
@@ -175,7 +179,7 @@ KIND_POINTS = {
     "job_remote": 30,     # remote job, location unclear
     "struggle": 40,       # owner describing a pain we solve
     "hiring_news": 20,
-    "job_locked": 20,     # remote but US/UK only -> pitch as contractor
+    "job_locked": 14,     # remote but US/UK only -> pitch as contractor
     "tech_ghl": 20,
     "crm_news": 15,
     "funding": 15,
@@ -360,6 +364,9 @@ def with_defaults(cfg):
     cfg.setdefault("exclude_words", DEFAULT_EXCLUDE)
     cfg.setdefault("freelancer_queries", DEFAULT_FREELANCER_QUERIES)
     cfg.setdefault("use_reddit", False)  # Reddit needs an approved API key; off until then
+    cfg.setdefault("find_contacts", True)  # find emails on company sites (free)
+    cfg.setdefault("contact_limit", 20)    # how many top leads to enrich per scan
+    cfg.setdefault("use_craigslist", True)  # Craigslist gigs via public RSS
     cfg.setdefault("delay_seconds", 1)
     return cfg
 
@@ -579,6 +586,40 @@ def job_events(jobs, cats, source, lookback):
 
 # ------------------------------------------------------ remote job feeds --
 
+def rss_items(txt, limit=60):
+    """Generic RSS/Atom item extractor -> [(title, link, date, description)]."""
+    if not txt:
+        return []
+    try:
+        root = ET.fromstring(txt.encode("utf-8") if isinstance(txt, str) else txt)
+    except ET.ParseError:
+        return []
+    items = root.findall(".//item") or root.findall(
+        ".//{http://www.w3.org/2005/Atom}entry")
+    out = []
+    for it in items[:limit]:
+        def tx(*names):
+            for n in names:
+                el = it.find(n)
+                if el is not None and el.text:
+                    return el.text.strip()
+                for ch in it:  # namespaced variants like <dc:date>
+                    if ch.tag.rpartition("}")[-1] == n and ch.text:
+                        return ch.text.strip()
+            return ""
+        link = tx("link")
+        if not link:
+            le = it.find("link") or it.find("{http://www.w3.org/2005/Atom}link")
+            link = le.get("href", "") if le is not None else ""
+        title = tx("title")
+        if title:
+            out.append((title, link, to_date(tx("pubDate", "date", "published",
+                                              "updated")),
+                        strip_html(tx("description", "summary", "encoded",
+                                      "content"))))
+    return out
+
+
 def feed_remoteok():
     d = http_get("https://remoteok.com/api")
     if not isinstance(d, list):
@@ -642,9 +683,19 @@ def feed_jobicy():
         j.get("pubDate")), "source": "Jobicy"} for j in d["jobs"]]
 
 
+def feed_workingnomads():
+    d = http_get("https://www.workingnomads.com/api/exposed_jobs/")
+    if not isinstance(d, list):
+        return []
+    return [{"company": j.get("company_name", ""), **_job(
+        j.get("title"), j.get("location") or "", "Remote", j.get("url"),
+        j.get("pub_date")), "source": "Working Nomads"}
+        for j in d if isinstance(j, dict) and j.get("title")]
+
+
 FEEDS = [("RemoteOK", feed_remoteok), ("Remotive", feed_remotive),
          ("We Work Remotely", feed_wwr), ("Himalayas", feed_himalayas),
-         ("Jobicy", feed_jobicy)]
+         ("Jobicy", feed_jobicy), ("Working Nomads", feed_workingnomads)]
 
 
 def load_feeds(on_step=None):
@@ -717,15 +768,27 @@ def freelancer_projects(query, n=50):
     for p in ((d or {}).get("result") or {}).get("projects") or []:
         b = p.get("budget") or {}
         cur = (p.get("currency") or {}).get("code") or ""
+        hourly = p.get("type") == "hourly"
         budget = (f"{cur} {b.get('minimum'):g}-{b.get('maximum'):g}"
-                  f"{'/hr' if p.get('type') == 'hourly' else ''}"
+                  f"{'/hr' if hourly else ''}"
                   if b.get("minimum") and b.get("maximum") else "")
         out.append({"id": p.get("id"), "title": p.get("title") or "",
                     "text": p.get("preview_description") or "",
                     "url": f"https://www.freelancer.com/projects/{p.get('seo_url', '')}",
                     "date": to_date(p.get("time_submitted")), "budget": budget,
+                    "worth": (b.get("maximum") or 0) * (20 if hourly else 1),
                     "bids": (p.get("bid_stats") or {}).get("bid_count")})
     return out
+
+
+def budget_bonus(worth, bids):
+    """Score tweak for Freelancer.com asks: real money attached is worth more;
+    a project already swamped with bids is harder to win."""
+    bonus = (20 if worth >= 500 else 10 if worth >= 200 else
+             -15 if 0 < worth < 50 else 0)
+    if (bids or 0) >= 50:
+        bonus -= 10
+    return bonus
 
 
 def phrase_regex(words):
@@ -948,7 +1011,8 @@ def analyse(name, events, lookback):
                                                        e["kind"].startswith("job") else 0)):
             continue
         seen.add(key)
-        e["points"] = max(1, round(KIND_POINTS[e["kind"]] * recency(e["date"])))
+        e["points"] = max(1, round((KIND_POINTS[e["kind"]] + e.get("bonus", 0))
+                                  * recency(e["date"])))
         e["label"] = KIND_LABEL[e["kind"]]
         evs.append(e)
     evs.sort(key=lambda e: (e["points"], e["date"]), reverse=True)
@@ -1038,6 +1102,7 @@ def run(companies, cfg, on_progress=None, should_stop=lambda: False):
         if on_progress:
             on_progress(i, len(companies), c["company"], res)
         time.sleep(cfg.get("delay_seconds", 1))
+    enrich_contacts(results, cfg, on_progress, should_stop)
     return results
 
 
@@ -1050,7 +1115,10 @@ def discover(cfg, on_progress=None, should_stop=lambda: False):
     since = int((datetime.now() - timedelta(days=lb)).timestamp())
     subs = cfg["subreddits"] if cfg.get("use_reddit") else []
     kws, fl = cfg["hn_keywords"], cfg.get("freelancer_queries") or []
-    total = len(FEEDS) + len(subs) + len(kws) + len(fl)
+    cl = ((len(cfg.get("craigslist_cities") or DEFAULT_CRAIGS_CITIES)
+           * len(cfg.get("craigslist_queries") or DEFAULT_CRAIGS_QUERIES))
+          if cfg.get("use_craigslist", True) else 0)
+    total = len(FEEDS) + len(subs) + len(kws) + len(fl) + cl
     done = [0]
     groups = {}
 
@@ -1121,9 +1189,39 @@ def discover(cfg, on_progress=None, should_stop=lambda: False):
             add(f"Freelancer.com project #{p['id']}",
                 ev("ask", need, "Freelancer.com", p["title"], p["url"], p["date"],
                    f"Freelancer.com: {p['title']}" + (f" ({extra})" if extra else ""),
-                   segment=m.segment(full), post=p["text"][:600]),
+                   segment=m.segment(full), post=p["text"][:600],
+                   bonus=budget_bonus(p.get("worth"), p.get("bids"))),
                 contact=p["url"])
         time.sleep(cfg.get("delay_seconds", 1))
+
+    # 3b. Craigslist gigs: people asking for help, city by city (public RSS)
+    if cfg.get("use_craigslist", True):
+        cities = cfg.get("craigslist_cities") or DEFAULT_CRAIGS_CITIES
+        queries = cfg.get("craigslist_queries") or DEFAULT_CRAIGS_QUERIES
+        for city in cities:
+            for q in queries:
+                if should_stop():
+                    break
+                step(f"Craigslist {city}: {q}")
+                txt = http_get(f"https://{city}.craigslist.org/search/ggg"
+                               f"?format=rss&query={urllib.parse.quote(q)}"
+                               f"&sort=date", as_json=False)
+                for title, link, date, desc in rss_items(txt):
+                    if link in seen_projects or not in_window(date, lb):
+                        continue
+                    seen_projects.add(link)
+                    full = f"{title} {desc}"
+                    if OFFER_RE.search(full) or (m.exclude and m.exclude.search(full)):
+                        continue
+                    need = (categorize(full, cats) or m.pains(full) or [None])[0]
+                    if not need:
+                        continue
+                    add(f"Craigslist {city} - {title[:60]}",
+                        ev("ask", need, f"Craigslist {city}", title, link, date,
+                           f"Craigslist ({city}): {title}",
+                           segment=m.segment(full), post=desc[:600]),
+                        contact=link)
+                time.sleep(cfg.get("delay_seconds", 1))
 
     # 4. Hacker News: Who is hiring + asks
     for kw in kws:
@@ -1145,7 +1243,125 @@ def discover(cfg, on_progress=None, should_stop=lambda: False):
                    sources=", ".join(sorted({e["source"] for e in res["signals"]})))
         results.append(res)
     results.sort(key=lambda r: (r["score"], r["newest"]), reverse=True)
-    return results[: cfg.get("discover_limit", 75)]
+    results = results[: cfg.get("discover_limit", 75)]
+    enrich_contacts(results, cfg, on_progress, should_stop)
+    return results
+
+# ---------------------------------------------------------------- contacts --
+
+EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}")
+BAD_TLDS = {"png", "jpg", "jpeg", "gif", "svg", "webp", "css", "js", "ico", "woff",
+            "woff2", "ttf", "eot", "mp4", "pdf", "zip"}
+BAD_LOCAL = ("noreply", "no-reply", "donotreply", "mailer", "daemon", "postmaster",
+             "unsubscribe", "example", "yourname", "username", "your_email", "test@")
+BAD_DOMAIN = ("example.", "sentry", "wixpress", "yourdomain", "domain.tld")
+GENERIC_LOCAL = {"info", "hello", "hi", "contact", "team", "support", "help",
+                 "sales", "careers", "jobs", "admin", "office", "enquiries",
+                 "inquiries", "grow", "getstarted", "mail", "connect"}
+CONTACT_PATHS = ("contact", "about", "team", "careers", "staff", "leadership",
+                 "people", "company")
+
+
+def contact_emails(page, domain):
+    """Ranked emails on one page: same-domain and personal-looking addresses first."""
+    out = {}
+    for e in EMAIL_RE.findall(page or ""):
+        e = e.strip(".,;:()>[]\"'").lower()
+        local, _, dom = e.rpartition("@")
+        if not local or not dom or dom.rsplit(".", 1)[-1] in BAD_TLDS:
+            continue
+        if any(b in local for b in BAD_LOCAL) or any(b in dom for b in BAD_DOMAIN):
+            continue
+        if len(local) > 40 or len(e) > 70:
+            continue
+        core = local.split("+")[0]
+        personal = bool(re.match(r"^[a-z]{2,}[._-][a-z]{2,}$", core))
+        score = (3 if dom == domain or dom.endswith("." + domain) else 0) + \
+                (2 if personal else 0) + (1 if core in GENERIC_LOCAL else 0)
+        out[e] = max(out.get(e, 0), score)
+    return [e for e, _ in sorted(out.items(), key=lambda x: (-x[1], x[0]))][:5]
+
+
+def guess_site(c):
+    """For a company with no website: try <slug>.com/.io/.co, kept only when the
+    page actually mentions the company name."""
+    base = norm(c.get("company", ""))
+    slug = base.replace(" ", "")
+    if len(slug) < 3:
+        return "", None
+    for tld in ("com", "io", "co"):
+        dom = f"{slug}.{tld}"
+        page = http_get(f"https://{dom}", as_json=False)
+        if page and name_regex(c["company"]).search(strip_html(page)[:4000]):
+            return dom, page
+    return "", None
+
+
+def find_contacts(c):
+    """Free contact-finding: the company's homepage, then its contact/about/team
+    pages. Returns (ranked emails, guessed contact name, site domain)."""
+    dom, home = domain_of(c.get("website", "")), None
+    if dom:
+        home = http_get(f"https://{dom}", as_json=False)
+    if not home and not is_person(c.get("company", "")):
+        dom, home = guess_site(c)
+    if not home:
+        return [], "", ""
+    pages, seen, i = [home], set(), 0
+    while i < len(pages) and len(pages) < 5:
+        for href in re.findall(r"href=[\"']([^\"']+)[\"']", pages[i]):
+            if len(pages) >= 5:
+                break
+            if not any(p in href.lower() for p in CONTACT_PATHS):
+                continue
+            u = urllib.parse.urljoin(f"https://{dom}/", href)
+            if domain_of(u) != dom or u in seen:
+                continue
+            seen.add(u)
+            sub = http_get(u, as_json=False)
+            if sub:
+                pages.append(sub)
+        i += 1
+    emails = []
+    for p in pages:
+        for e in contact_emails(p, dom):
+            if e not in emails:
+                emails.append(e)
+    name = ""
+    if emails:
+        m = re.match(r"^([a-z]{3,})[._-]([a-z]{3,})$", emails[0].split("@")[0])
+        if m and m.group(1) not in GENERIC_LOCAL:
+            name = f"{m.group(1).title()} {m.group(2).title()}"
+    return emails[:3], name, dom
+
+
+def enrich_contacts(results, cfg, on_progress=None, should_stop=lambda: False):
+    """Fill contact_email / contact_name on the top company leads, free, from their
+    own websites. Person leads keep 'reply on the post'."""
+    if not cfg.get("find_contacts", True):
+        return
+    limit = int(cfg.get("contact_limit", 20))
+    ranked = sorted(results, key=lambda r: r.get("score", 0), reverse=True)
+    tried = 0
+    for r in ranked:
+        if tried >= limit or should_stop():
+            break
+        c = r.get("company") or {}
+        if c.get("contact_email") or is_person(c.get("company", "")):
+            continue
+        if r.get("tier") == "COLD":
+            continue
+        tried += 1
+        if on_progress:
+            on_progress(tried, limit, f"Finding contacts: {c['company']}", None)
+        emails, name, dom = find_contacts(c)
+        if dom and not c.get("website"):
+            c["website"] = f"https://{dom}"
+        if emails:
+            c["contact_email"] = emails[0]
+            if name and not c.get("contact_name"):
+                c["contact_name"] = name
+        time.sleep(max(0.5, cfg.get("delay_seconds", 1)))
 
 # ------------------------------------------------------------------ emails --
 
@@ -1220,7 +1436,7 @@ PAIN_OPENER = {
 }
 
 
-PERSON_PREFIXES = ("Reddit ", "HN user ", "Freelancer.com ")
+PERSON_PREFIXES = ("Reddit ", "HN user ", "Freelancer.com ", "Craigslist ")
 
 
 def is_person(name):
@@ -1334,6 +1550,23 @@ def build_email(cfg, company, result):
             f"{cta}")
     return subject, body + sig
 
+
+def build_bid(cfg, company, result):
+    """Freelancer.com proposal - short and direct, not a formal email."""
+    top = result["signals"][0] if result["signals"] else {}
+    need = result["needs"][0] if result["needs"] else "CRM Automation"
+    wins = SMALL_WINS.get(need, SMALL_WINS["CRM Automation"])
+    body = (f"Hi! Your project \"{top.get('title', '')[:90]}\" is exactly the work "
+            f"I do.\n\nI'm a remote CRM & sales systems specialist with "
+            f"{cfg['years']} years in B2B sales and hands-on builds in "
+            f"{cfg['tools']}. {cfg['proof_point']}\n\n"
+            "What I'd handle for you:\n" +
+            "\n".join("- " + w for w in wins[:3]) +
+            "\n\nHappy to start with one small task so you can see the result "
+            "first. I work fully remote (GMT+5) and can start right away.\n\n"
+            f"{cfg['your_name']}")
+    return f"Bid for: {top.get('title', '')[:60]}", body
+
 # ------------------------------------------------------------------ output --
 
 HDR_FILL = PatternFill("solid", fgColor="1F3A5F")
@@ -1434,7 +1667,10 @@ def write_outputs(cfg, results, label="List", seen=None, out_dir=None, emails=Tr
         leads.cell(row, LEAD_COLS.index("Sent date") + 1).number_format = "yyyy-mm-dd"
 
         if r["tier"] != "COLD":
-            subject, body = build_email(cfg, c, r)
+            if c["company"].startswith("Freelancer.com"):
+                subject, body = build_bid(cfg, c, r)
+            else:
+                subject, body = build_email(cfg, c, r)
             r["email"] = {"subject": subject, "body": body}
             em_ws.append([c["company"], r["tier"], c.get("contact_email") or (
                 "Reply on the post" if person else "[add email]"), subject, body])

@@ -56,10 +56,24 @@ def test_discover_job_end_to_end(client):
     assert client.get(f"/runs/{runs[0]['id']}/xlsx").status_code == 200
 
 
+def test_lead_status_roundtrip(client):
+    login(client)
+    r = client.post("/lead-status", json={"key": "acme dental", "name": "Acme Dental",
+                                          "status": "contacted"})
+    assert r.status_code == 200
+    st = client.get("/lead-statuses").get_json()
+    assert st["acme dental"]["status"] == "contacted" and st["acme dental"]["sent"]
+    assert client.post("/lead-status", json={"key": "acme dental",
+                                             "status": "bogus"}).status_code == 400
+    assert client.post("/lead-status", json={"key": "acme dental",
+                                             "status": ""}).status_code == 200
+    assert "acme dental" not in client.get("/lead-statuses").get_json()
+
+
 def test_cron_scan_script_stores_runs():
     import cron_scan
     before = len(webapp.db.list_runs(100))
     assert cron_scan.main() == 0
     runs = webapp.db.list_runs(100)
-    assert len(runs) == before + 1 and runs[0]["label"] == "Weekly: Find warm companies"
+    assert len(runs) == before + 1 and runs[0]["label"] == "Daily: Find warm companies"
     assert runs[0]["status"] == "done"

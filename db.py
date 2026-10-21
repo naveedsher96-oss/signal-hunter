@@ -46,6 +46,9 @@ SCHEMA = [
     ("CREATE TABLE IF NOT EXISTS runs (id {pk}, mode TEXT NOT NULL, label TEXT, "
      "created TEXT NOT NULL, status TEXT NOT NULL, summary TEXT, results TEXT, "
      "xlsx {blob}, xlsx_name TEXT, error TEXT)"),
+    ("CREATE TABLE IF NOT EXISTS lead_status (k TEXT PRIMARY KEY, name TEXT NOT NULL, "
+     "status TEXT NOT NULL, sent TEXT NOT NULL, note TEXT NOT NULL, "
+     "updated TEXT NOT NULL)"),
 ]
 
 
@@ -160,6 +163,28 @@ def get_run_xlsx(run_id):
     if not r or r[0] is None:
         return None, None
     return bytes(r[0]), r[1]
+
+
+# ------------------------------------------------------------ lead status --
+
+def set_lead_status(k, name, status, sent, note):
+    execute("INSERT INTO lead_status (k, name, status, sent, note, updated) "
+            "VALUES (?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT (k) DO UPDATE SET name = excluded.name, "
+            "status = excluded.status, sent = excluded.sent, "
+            "note = excluded.note, updated = excluded.updated",
+            (k, name, status, sent, note, now()))
+
+
+def get_lead_statuses():
+    return {r[0]: {"name": r[1], "status": r[2], "sent": r[3], "note": r[4],
+                   "updated": r[5]}
+            for r in execute("SELECT k, name, status, sent, note, updated "
+                             "FROM lead_status", fetch="all") or []}
+
+
+def clear_lead_status(k):
+    execute("DELETE FROM lead_status WHERE k = ?", (k,))
 
 
 def mark_stale_runs():
