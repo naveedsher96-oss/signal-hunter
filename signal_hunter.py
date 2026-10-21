@@ -134,6 +134,10 @@ DEFAULT_EXCLUDE = ["looking for work", "looking for a job", "looking for job",
                    "open to work", "job hunting", "job seeker", "my resume", "my cv",
                    "hire me", "i can help you", "offering my services"]
 # Freelancer.com searches: public project posts from people paying for this work
+DEFAULT_CRAIGS_CITIES = ["newyork", "sfbay", "losangeles", "chicago", "boston",
+                         "austin", "seattle", "denver"]
+DEFAULT_CRAIGS_QUERIES = ["virtual assistant", "crm", "data entry",
+                          "appointment setter"]
 DEFAULT_FREELANCER_QUERIES = ["gohighlevel", "crm", "hubspot", "zoho", "salesforce admin",
                               "zapier", "virtual assistant", "data entry",
                               "appointment setter", "lead generation", "customer support"]
@@ -362,6 +366,7 @@ def with_defaults(cfg):
     cfg.setdefault("use_reddit", False)  # Reddit needs an approved API key; off until then
     cfg.setdefault("find_contacts", True)  # find emails on company sites (free)
     cfg.setdefault("contact_limit", 20)    # how many top leads to enrich per scan
+    cfg.setdefault("use_craigslist", True)  # Craigslist gigs via public RSS
     cfg.setdefault("delay_seconds", 1)
     return cfg
 
@@ -581,6 +586,40 @@ def job_events(jobs, cats, source, lookback):
 
 # ------------------------------------------------------ remote job feeds --
 
+def rss_items(txt, limit=60):
+    """Generic RSS/Atom item extractor -> [(title, link, date, description)]."""
+    if not txt:
+        return []
+    try:
+        root = ET.fromstring(txt.encode("utf-8") if isinstance(txt, str) else txt)
+    except ET.ParseError:
+        return []
+    items = root.findall(".//item") or root.findall(
+        ".//{http://www.w3.org/2005/Atom}entry")
+    out = []
+    for it in items[:limit]:
+        def tx(*names):
+            for n in names:
+                el = it.find(n)
+                if el is not None and el.text:
+                    return el.text.strip()
+                for ch in it:  # namespaced variants like <dc:date>
+                    if ch.tag.rpartition("}")[-1] == n and ch.text:
+                        return ch.text.strip()
+            return ""
+        link = tx("link")
+        if not link:
+            le = it.find("link") or it.find("{http://www.w3.org/2005/Atom}link")
+            link = le.get("href", "") if le is not None else ""
+        title = tx("title")
+        if title:
+            out.append((title, link, to_date(tx("pubDate", "date", "published",
+                                              "updated")),
+                        strip_html(tx("description", "summary", "encoded",
+                                      "content"))))
+    return out
+
+
 def feed_remoteok():
     d = http_get("https://remoteok.com/api")
     if not isinstance(d, list):
@@ -644,9 +683,19 @@ def feed_jobicy():
         j.get("pubDate")), "source": "Jobicy"} for j in d["jobs"]]
 
 
+def feed_workingnomads():
+    d = http_get("https://www.workingnomads.com/api/exposed_jobs/")
+    if not isinstance(d, list):
+        return []
+    return [{"company": j.get("company_name", ""), **_job(
+        j.get("title"), j.get("location") or "", "Remote", j.get("url"),
+        j.get("pub_date")), "source": "Working Nomads"}
+        for j in d if isinstance(j, dict) and j.get("title")]
+
+
 FEEDS = [("RemoteOK", feed_remoteok), ("Remotive", feed_remotive),
          ("We Work Remotely", feed_wwr), ("Himalayas", feed_himalayas),
-         ("Jobicy", feed_jobicy)]
+         ("Jobicy", feed_jobicy), ("Working Nomads", feed_workingnomads)]
 
 
 def load_feeds(on_step=None):
@@ -1066,7 +1115,10 @@ def discover(cfg, on_progress=None, should_stop=lambda: False):
     since = int((datetime.now() - timedelta(days=lb)).timestamp())
     subs = cfg["subreddits"] if cfg.get("use_reddit") else []
     kws, fl = cfg["hn_keywords"], cfg.get("freelancer_queries") or []
-    total = len(FEEDS) + len(subs) + len(kws) + len(fl)
+    cl = ((len(cfg.get("craigslist_cities") or DEFAULT_CRAIGS_CITIES)
+           * len(cfg.get("craigslist_queries") or DEFAULT_CRAIGS_QUERIES))
+          if cfg.get("use_craigslist", True) else 0)
+    total = len(FEEDS) + len(subs) + len(kws) + len(fl) + cl
     done = [0]
     groups = {}
 
@@ -1141,6 +1193,35 @@ def discover(cfg, on_progress=None, should_stop=lambda: False):
                    bonus=budget_bonus(p.get("worth"), p.get("bids"))),
                 contact=p["url"])
         time.sleep(cfg.get("delay_seconds", 1))
+
+    # 3b. Craigslist gigs: people asking for help, city by city (public RSS)
+    if cfg.get("use_craigslist", True):
+        cities = cfg.get("craigslist_cities") or DEFAULT_CRAIGS_CITIES
+        queries = cfg.get("craigslist_queries") or DEFAULT_CRAIGS_QUERIES
+        for city in cities:
+            for q in queries:
+                if should_stop():
+                    break
+                step(f"Craigslist {city}: {q}")
+                txt = http_get(f"https://{city}.craigslist.org/search/ggg"
+                               f"?format=rss&query={urllib.parse.quote(q)}"
+                               f"&sort=date", as_json=False)
+                for title, link, date, desc in rss_items(txt):
+                    if link in seen_projects or not in_window(date, lb):
+                        continue
+                    seen_projects.add(link)
+                    full = f"{title} {desc}"
+                    if OFFER_RE.search(full) or (m.exclude and m.exclude.search(full)):
+                        continue
+                    need = (categorize(full, cats) or m.pains(full) or [None])[0]
+                    if not need:
+                        continue
+                    add(f"Craigslist {city} - {title[:60]}",
+                        ev("ask", need, f"Craigslist {city}", title, link, date,
+                           f"Craigslist ({city}): {title}",
+                           segment=m.segment(full), post=desc[:600]),
+                        contact=link)
+                time.sleep(cfg.get("delay_seconds", 1))
 
     # 4. Hacker News: Who is hiring + asks
     for kw in kws:
@@ -1355,7 +1436,7 @@ PAIN_OPENER = {
 }
 
 
-PERSON_PREFIXES = ("Reddit ", "HN user ", "Freelancer.com ")
+PERSON_PREFIXES = ("Reddit ", "HN user ", "Freelancer.com ", "Craigslist ")
 
 
 def is_person(name):

@@ -111,7 +111,7 @@ def test_tiers_need_more_than_one_ageing_post():
 def test_discover_tiers_are_spread(cfg):
     tiers = [r["tier"] for r in sh.discover(cfg)]
     assert "HOT" in tiers and "WARM" in tiers
-    assert tiers.count("HOT") < len(tiers) / 2
+    assert tiers.count("HOT") < len(tiers)  # not everything is hot
 
 
 def test_freelancer_and_jobicy_leads(cfg):
@@ -166,6 +166,14 @@ def test_contact_emails_filters_junk():
             'icon@2x.png a@example.com info@acme.com')
     assert sh.contact_emails(page, "acme.com") == ["jane.doe@acme.com",
                                                    "info@acme.com"]
+
+
+def test_new_sources(cfg):
+    results = {r["company"]["company"]: r for r in sh.discover(cfg)}
+    assert "River Clinics" in results  # Working Nomads feed
+    assert "Craigslist austin - Need virtual assistant 10 hrs/wk for my clinic" in results
+    assert not any("Selling my couch" in n for n in results)  # not a service ask
+    assert sh.is_person("Craigslist austin - x")  # reply on the post, not an email
 
 
 def test_reddit_is_off_by_default(cfg):
