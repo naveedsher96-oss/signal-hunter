@@ -119,6 +119,20 @@ def test_freelancer_and_jobicy_leads(cfg):
     fl = results["Freelancer.com project #40778167"]  # found by two queries, listed once
     assert fl["signals"][0]["kind"] == "ask" and fl["needs"][0] == "GoHighLevel"
     assert len(fl["signals"]) == 1 and "USD 10-15/hr" in fl["signals"][0]["detail"]
+    # USD 15/hr -> worth ~300 -> +10 bonus on top of the 50-point ask
+    assert fl["signals"][0]["points"] == 60
+
+
+def test_budget_bonus():
+    assert sh.budget_bonus(600, 10) == 20    # real money
+    assert sh.budget_bonus(300, 10) == 10
+    assert sh.budget_bonus(30, 10) == -15    # tiny budget
+    assert sh.budget_bonus(600, 60) == 10    # big but 50+ bids already
+    assert sh.budget_bonus(0, None) == 0
+
+
+def test_freelancer_filtering_and_persons(cfg):
+    results = {r["company"]["company"]: r for r in sh.discover(cfg)}
     assert "Freelancer.com project #40778168" not in results  # logo job: not our service
     assert "Freelancer.com project #40778169" not in results  # outside lookback window
     assert "Peak Roofing" in results  # Jobicy feed

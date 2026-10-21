@@ -175,7 +175,7 @@ KIND_POINTS = {
     "job_remote": 30,     # remote job, location unclear
     "struggle": 40,       # owner describing a pain we solve
     "hiring_news": 20,
-    "job_locked": 20,     # remote but US/UK only -> pitch as contractor
+    "job_locked": 14,     # remote but US/UK only -> pitch as contractor
     "tech_ghl": 20,
     "crm_news": 15,
     "funding": 15,
@@ -719,15 +719,27 @@ def freelancer_projects(query, n=50):
     for p in ((d or {}).get("result") or {}).get("projects") or []:
         b = p.get("budget") or {}
         cur = (p.get("currency") or {}).get("code") or ""
+        hourly = p.get("type") == "hourly"
         budget = (f"{cur} {b.get('minimum'):g}-{b.get('maximum'):g}"
-                  f"{'/hr' if p.get('type') == 'hourly' else ''}"
+                  f"{'/hr' if hourly else ''}"
                   if b.get("minimum") and b.get("maximum") else "")
         out.append({"id": p.get("id"), "title": p.get("title") or "",
                     "text": p.get("preview_description") or "",
                     "url": f"https://www.freelancer.com/projects/{p.get('seo_url', '')}",
                     "date": to_date(p.get("time_submitted")), "budget": budget,
+                    "worth": (b.get("maximum") or 0) * (20 if hourly else 1),
                     "bids": (p.get("bid_stats") or {}).get("bid_count")})
     return out
+
+
+def budget_bonus(worth, bids):
+    """Score tweak for Freelancer.com asks: real money attached is worth more;
+    a project already swamped with bids is harder to win."""
+    bonus = (20 if worth >= 500 else 10 if worth >= 200 else
+             -15 if 0 < worth < 50 else 0)
+    if (bids or 0) >= 50:
+        bonus -= 10
+    return bonus
 
 
 def phrase_regex(words):
@@ -950,7 +962,8 @@ def analyse(name, events, lookback):
                                                        e["kind"].startswith("job") else 0)):
             continue
         seen.add(key)
-        e["points"] = max(1, round(KIND_POINTS[e["kind"]] * recency(e["date"])))
+        e["points"] = max(1, round((KIND_POINTS[e["kind"]] + e.get("bonus", 0))
+                                  * recency(e["date"])))
         e["label"] = KIND_LABEL[e["kind"]]
         evs.append(e)
     evs.sort(key=lambda e: (e["points"], e["date"]), reverse=True)
@@ -1124,7 +1137,8 @@ def discover(cfg, on_progress=None, should_stop=lambda: False):
             add(f"Freelancer.com project #{p['id']}",
                 ev("ask", need, "Freelancer.com", p["title"], p["url"], p["date"],
                    f"Freelancer.com: {p['title']}" + (f" ({extra})" if extra else ""),
-                   segment=m.segment(full), post=p["text"][:600]),
+                   segment=m.segment(full), post=p["text"][:600],
+                   bonus=budget_bonus(p.get("worth"), p.get("bids"))),
                 contact=p["url"])
         time.sleep(cfg.get("delay_seconds", 1))
 
