@@ -1469,6 +1469,23 @@ def build_email(cfg, company, result):
             f"{cta}")
     return subject, body + sig
 
+
+def build_bid(cfg, company, result):
+    """Freelancer.com proposal - short and direct, not a formal email."""
+    top = result["signals"][0] if result["signals"] else {}
+    need = result["needs"][0] if result["needs"] else "CRM Automation"
+    wins = SMALL_WINS.get(need, SMALL_WINS["CRM Automation"])
+    body = (f"Hi! Your project \"{top.get('title', '')[:90]}\" is exactly the work "
+            f"I do.\n\nI'm a remote CRM & sales systems specialist with "
+            f"{cfg['years']} years in B2B sales and hands-on builds in "
+            f"{cfg['tools']}. {cfg['proof_point']}\n\n"
+            "What I'd handle for you:\n" +
+            "\n".join("- " + w for w in wins[:3]) +
+            "\n\nHappy to start with one small task so you can see the result "
+            "first. I work fully remote (GMT+5) and can start right away.\n\n"
+            f"{cfg['your_name']}")
+    return f"Bid for: {top.get('title', '')[:60]}", body
+
 # ------------------------------------------------------------------ output --
 
 HDR_FILL = PatternFill("solid", fgColor="1F3A5F")
@@ -1569,7 +1586,10 @@ def write_outputs(cfg, results, label="List", seen=None, out_dir=None, emails=Tr
         leads.cell(row, LEAD_COLS.index("Sent date") + 1).number_format = "yyyy-mm-dd"
 
         if r["tier"] != "COLD":
-            subject, body = build_email(cfg, c, r)
+            if c["company"].startswith("Freelancer.com"):
+                subject, body = build_bid(cfg, c, r)
+            else:
+                subject, body = build_email(cfg, c, r)
             r["email"] = {"subject": subject, "body": body}
             em_ws.append([c["company"], r["tier"], c.get("contact_email") or (
                 "Reply on the post" if person else "[add email]"), subject, body])

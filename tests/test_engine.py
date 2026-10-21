@@ -139,6 +139,18 @@ def test_freelancer_filtering_and_persons(cfg):
     assert sh.is_person("Freelancer.com project #1") and not sh.is_person("Peak Roofing")
 
 
+def test_freelancer_lead_gets_bid_draft(cfg, tmp_path):
+    results = sh.discover(cfg)
+    sh.write_outputs(cfg, results, "Discover", seen={}, out_dir=str(tmp_path),
+                     emails=False)
+    fl = next(r for r in results
+              if r["company"]["company"].startswith("Freelancer.com"))
+    body = fl["email"]["body"]
+    assert body.startswith("Hi!") and cfg["your_name"] in body
+    assert "GoHighLevel Agency" in fl["email"]["subject"]
+    assert len(body) < 1200 and "Best regards" not in body
+
+
 def test_contact_finder_fills_email(cfg):
     results = {r["company"]["company"]: r for r in sh.discover(cfg)}
     nim = results["Nimbus Realty"]
