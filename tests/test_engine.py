@@ -194,3 +194,38 @@ def test_env_file_loader(tmp_path, monkeypatch):
     assert os.environ["SH_TEST_A"] == "one"
     assert os.environ["SH_TEST_B"] == "already set"
     monkeypatch.delenv("SH_TEST_A")
+
+
+def test_freelancer_budget_bids_and_age_filters(cfg, monkeypatch):
+    names = lambda c: {r["company"]["company"] for r in sh.discover(c)}
+    assert "Freelancer.com project #40778167" in names(cfg)  # USD 15/hr, 40 bids, 2 days
+    assert "Freelancer.com project #40778167" not in names(dict(cfg, min_budget_usd=500))
+    assert "Freelancer.com project #40778167" not in names(dict(cfg, max_bids=30))
+    assert "Freelancer.com project #40778167" not in names(dict(cfg, max_ask_age_days=1))
+    assert "Freelancer.com project #40778167" in names(dict(cfg, max_ask_age_days=0))  # off
+
+
+def test_freelancer_worth_is_in_usd(monkeypatch):
+    fake = {"result": {"projects": [{"id": 1, "title": "CRM", "type": "fixed",
+                                     "currency": {"code": "INR", "exchange_rate": 0.012},
+                                     "budget": {"minimum": 5000, "maximum": 10000}},
+                                    {"id": 2, "title": "CRM", "type": "fixed",
+                                     "currency": {"code": "XYZ"},
+                                     "budget": {"minimum": 50, "maximum": 100}}]}}
+    monkeypatch.setattr(sh, "http_get", lambda url, **k: fake)
+    worth = [p["worth"] for p in sh.freelancer_projects("crm")]
+    assert worth == [120, 0]  # INR 10,000 is about $120; unknown currency -> 0 (no filter)
+
+
+def test_first_seen_dates(cfg, tmp_path):
+    results = sh.discover(cfg)
+    seen = {}
+    sh.write_outputs(cfg, results, "T", seen=seen, out_dir=str(tmp_path), emails=False)
+    today = sh.datetime.now().strftime("%Y-%m-%d")
+    assert all(r["first_seen"] == today for r in results if r["signals"])
+    for r in results:
+        for s in r["signals"]:
+            seen[f"{r['company']['company'].lower()}|{s['kind']}|{s['url'] or s['detail'][:80]}"] = "2026-01-01"
+    sh.write_outputs(cfg, results, "T", seen=seen, out_dir=str(tmp_path), emails=False)
+    assert all(r["first_seen"] == "2026-01-01" and not r["any_new"]
+               for r in results if r["signals"])

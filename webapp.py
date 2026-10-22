@@ -13,11 +13,13 @@ Environment variables (all optional locally):
   CRON_TOKEN            secret the scheduled GitHub Action sends to /api/cron
   REDDIT_CLIENT_ID      free Reddit "script" app - keeps Reddit working on servers
   REDDIT_CLIENT_SECRET
+  NTFY_TOPIC            ntfy.sh topic for phone alerts (overrides the setting)
 """
 
 import hmac
 import json
 import os
+import re
 import secrets
 import sys
 import tempfile
@@ -40,7 +42,9 @@ ALLOWED = (".xlsx", ".xlsm", ".csv")
 EDITABLE = {"your_name", "headline", "email", "linkedin", "portfolio", "years", "tools",
             "proof_point", "hiring_manager_titles", "lookback_days", "categories",
             "subreddits", "pain_signals", "smallbiz_words", "exclude_words",
-            "freelancer_queries", "use_reddit"}
+            "freelancer_queries", "use_reddit", "min_budget_usd", "max_bids",
+            "max_ask_age_days", "ntfy_topic"}
+NUMBERS = {"min_budget_usd": 100000, "max_bids": 1000, "max_ask_age_days": 180}
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY") or secrets.token_hex(32)
@@ -76,12 +80,55 @@ def summarise(r):
             "track": r["track"], "remote": r["remote_evidence"], "needs": r["needs"],
             "segment": r.get("segment", ""), "count": r["intent_count"],
             "newest": r["newest"], "sources": r.get("sources", ""),
-            "new": r.get("any_new", False), "to": c.get("contact_email", ""),
+            "new": r.get("any_new", False), "first_seen": r.get("first_seen", ""),
+            "to": c.get("contact_email", ""), "website": c.get("website", ""),
             "person": sh.is_person(c["company"]),
             "url": top["url"] if top else "", "email": r.get("email"),
             "signals": [{"label": s["label"], "detail": s["detail"], "url": s["url"],
                          "date": s["date"], "points": s["points"]}
-                        for s in r["signals"][:6]]}
+                        for s in r["signals"][:6]],
+            "ids": lead_ids(c.get("contact_email", ""), c.get("website", ""),
+                            top["url"] if top else "")}
+
+
+def lead_ids(email="", website="", url=""):
+    """Ways to recognise the same lead under another name: email, domain, post link."""
+    out = [(email or "").strip().lower(), sh.domain_of(website or "") if website else "",
+           (url or "").strip().lower().rstrip("/")]
+    return [x for x in out if x]
+
+
+def handled(row, statuses):
+    """The saved pipeline status that matches this lead (by name or by an id)."""
+    st = statuses.get((row.get("company") or "").lower())
+    if st:
+        return st
+    ids = set(row.get("ids") or [])
+    return next((st for st in statuses.values() if ids & set(st.get("ids") or [])), None)
+
+
+def notify_hot(rows, cfg, statuses=None):
+    """Phone alert (free, ntfy.sh) for each HOT lead seen for the first time and not
+    handled yet. Returns how many leads were announced."""
+    topic = (os.environ.get("NTFY_TOPIC") or cfg.get("ntfy_topic") or "").strip()
+    if not topic:
+        return 0
+    statuses = db.get_lead_statuses() if statuses is None else statuses
+    fresh = [r for r in rows if r["tier"] == "HOT" and r.get("new")
+             and not handled(r, statuses)]
+    for r in fresh[:8]:
+        top = r["signals"][0] if r["signals"] else {}
+        sh.http_post_json("https://ntfy.sh/", {
+            "topic": topic, "title": f"HOT lead: {r['company']}"[:120],
+            "message": (top.get("detail") or r["track"])[:300]
+                       + (f"\nEmail: {r['to']}" if r.get("to") else ""),
+            "click": r.get("url") or top.get("url") or "", "tags": ["fire"],
+            "priority": 4})
+    if len(fresh) > 8:
+        sh.http_post_json("https://ntfy.sh/", {
+            "topic": topic, "title": f"{len(fresh) - 8} more HOT leads",
+            "message": "Open Signal Hunter to see them all.", "tags": ["fire"]})
+    return len(fresh)
 
 
 def file_info(upload_id):
@@ -134,8 +181,13 @@ def run_one(mode, companies, label):
         tiers = {t: sum(r["tier"] == t for r in rows) for t in ("HOT", "WARM", "COLD")}
         summary = {"label": label, "count": len(rows), "new": new, **tiers}
         db.finish_run(run_id, summary, rows, xlsx, name)
+        try:
+            alerted = notify_hot(rows, cfg)
+        except Exception:
+            traceback.print_exc()  # an alert failing must never fail the scan
+            alerted = 0
         with LOCK:
-            JOB.update(results=rows, new=new, current="Done")
+            JOB.update(results=rows, new=new, alerted=alerted, current="Done")
         return True
     except Exception as e:
         traceback.print_exc()
@@ -185,7 +237,7 @@ def require_login():
         return None
     if request.path.startswith(("/api/", "/runs", "/status", "/config", "/upload",
                                 "/paste", "/start", "/stop", "/saved-list",
-                                "/lead-status")):
+                                "/lead-status", "/test-alert")):
         return jsonify(error="Please log in again."), 401
     return redirect(url_for("login"))
 
@@ -260,6 +312,15 @@ def config():
                     v = max(7, min(180, int(v or 45)))
                 except (TypeError, ValueError):
                     return jsonify(error="Lookback days must be a number."), 400
+            if k in NUMBERS:
+                try:
+                    v = max(0, min(NUMBERS[k], int(float(v or 0))))
+                except (TypeError, ValueError):
+                    return jsonify(error=f"{k} must be a number."), 400
+            if k == "ntfy_topic":
+                v = (v or "").strip()
+                if v and not re.fullmatch(r"[A-Za-z0-9_-]{8,64}", v):
+                    return jsonify(error="Alert topic: 8-64 letters, digits, - or _."), 400
             cfg[k] = v
         db.set_setting("config", cfg)
     return jsonify(cfg)
@@ -347,7 +408,7 @@ def saved_list():
                     "saved": s.get("saved")} if s.get("companies") else {})
 
 
-LEAD_STATUSES = {"contacted", "replied", "call", "proposal", "won", "dead"}
+LEAD_STATUSES = {"contacted", "replied", "call", "proposal", "won", "dead", "junk"}
 
 
 @app.route("/lead-statuses", endpoint="lead_statuses")
@@ -369,8 +430,21 @@ def lead_status():
     sent = (d.get("sent") or "").strip()[:10]
     if status == "contacted" and not sent:
         sent = db.now()[:10]
-    db.set_lead_status(key, name, status, sent, (d.get("note") or "")[:500])
+    ids = [str(x).strip().lower()[:200] for x in (d.get("ids") or [])[:5] if str(x).strip()]
+    db.set_lead_status(key, name, status, sent, (d.get("note") or "")[:500], ids)
     return jsonify(ok=True)
+
+
+@app.route("/test-alert", methods=["POST"], endpoint="test_alert")
+def test_alert():
+    topic = ((request.get_json(silent=True) or {}).get("topic") or "").strip()
+    if not re.fullmatch(r"[A-Za-z0-9_-]{8,64}", topic):
+        return jsonify(error="Make or type a topic name first (8-64 letters/digits)."), 400
+    ok = sh.http_post_json("https://ntfy.sh/", {
+        "topic": topic, "title": "Signal Hunter test alert", "tags": ["white_check_mark"],
+        "message": "Alerts work. New HOT leads will show up here."})
+    return (jsonify(ok=True) if ok
+            else (jsonify(error="ntfy.sh didn't answer. Try again in a minute."), 502))
 
 
 @app.route("/runs")

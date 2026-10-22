@@ -256,6 +256,15 @@ def http_get(url, as_json=True, headers=None):
         return None
 
 
+def http_post_json(url, payload):
+    """POST a JSON body (phone alerts). Patched in tests like http_get."""
+    try:
+        r = SESSION.post(url, json=payload, headers=HEADERS, timeout=TIMEOUT)
+        return r.status_code < 300
+    except requests.RequestException:
+        return False
+
+
 def strip_html(s):
     return re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", " ", s or ""))).strip()
 
@@ -368,6 +377,10 @@ def with_defaults(cfg):
     cfg.setdefault("contact_limit", 20)    # how many top leads to enrich per scan
     cfg.setdefault("use_craigslist", True)  # Craigslist gigs via public RSS
     cfg.setdefault("delay_seconds", 1)
+    cfg.setdefault("min_budget_usd", 0)     # skip Freelancer.com projects below this (0 = off)
+    cfg.setdefault("max_bids", 0)           # skip projects with more bids than this (0 = off)
+    cfg.setdefault("max_ask_age_days", 14)  # asks older than this are usually filled (0 = off)
+    cfg.setdefault("ntfy_topic", "")        # phone alerts for new HOT leads (ntfy.sh)
     return cfg
 
 
@@ -767,7 +780,10 @@ def freelancer_projects(query, n=50):
     out = []
     for p in ((d or {}).get("result") or {}).get("projects") or []:
         b = p.get("budget") or {}
-        cur = (p.get("currency") or {}).get("code") or ""
+        currency = p.get("currency") or {}
+        cur = currency.get("code") or ""
+        # budgets come in many currencies; compare them in USD (0 = unknown)
+        rate = 1.0 if cur == "USD" else (currency.get("exchange_rate") or 0)
         hourly = p.get("type") == "hourly"
         budget = (f"{cur} {b.get('minimum'):g}-{b.get('maximum'):g}"
                   f"{'/hr' if hourly else ''}"
@@ -776,7 +792,7 @@ def freelancer_projects(query, n=50):
                     "text": p.get("preview_description") or "",
                     "url": f"https://www.freelancer.com/projects/{p.get('seo_url', '')}",
                     "date": to_date(p.get("time_submitted")), "budget": budget,
-                    "worth": (b.get("maximum") or 0) * (20 if hourly else 1),
+                    "worth": round((b.get("maximum") or 0) * rate * (20 if hourly else 1)),
                     "bids": (p.get("bid_stats") or {}).get("bid_count")})
     return out
 
@@ -1127,7 +1143,13 @@ def discover(cfg, on_progress=None, should_stop=lambda: False):
         if on_progress:
             on_progress(done[0], total, label, None)
 
+    max_age = int(cfg.get("max_ask_age_days") or 0)
+    min_budget = float(cfg.get("min_budget_usd") or 0)
+    max_bids = int(cfg.get("max_bids") or 0)
+
     def add(company, e, website="", contact=""):
+        if max_age and e["kind"] in ("ask", "struggle") and (days_ago(e["date"]) or 0) > max_age:
+            return  # an old ask has usually been filled already
         key = norm(company) or company.lower()
         g = groups.setdefault(key, {"company": {"company": company, "website": website,
                                                 "ats_slug": "", "contact_name": "",
@@ -1178,6 +1200,10 @@ def discover(cfg, on_progress=None, should_stop=lambda: False):
             if p["id"] in seen_projects or not in_window(p["date"], lb):
                 continue
             seen_projects.add(p["id"])
+            if min_budget and p["worth"] and p["worth"] < min_budget:
+                continue
+            if max_bids and (p["bids"] or 0) > max_bids:
+                continue
             full = f"{p['title']} {p['text']}"
             if OFFER_RE.search(full) or (m.exclude and m.exclude.search(full)):
                 continue
@@ -1637,11 +1663,13 @@ def write_outputs(cfg, results, label="List", seen=None, out_dir=None, emails=Tr
                 new_total += 1
                 any_new = True
             s["new"] = is_new
+            s["first_seen"] = seen[key]
             sig_ws.append([c["company"], s["label"], s["category"], s["source"],
                            s["points"], s["detail"], s["date"] or "-", s["url"],
                            "NEW" if is_new else ""])
             link(sig_ws.cell(sig_ws.max_row, 8), s["url"])
         r["any_new"] = any_new
+        r["first_seen"] = min((s["first_seen"] for s in r["signals"]), default="")
 
         top = r["signals"][0] if r["signals"] else None
         person = is_person(c["company"])
