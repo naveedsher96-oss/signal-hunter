@@ -219,7 +219,7 @@ const enc=encodeURIComponent;
 let FILE=null,timer=null,ROWS=[],LSTATUS={};
 const NUMS=["min_budget_usd","max_bids","max_ask_age_days"];
 const FIELDS=[["company","Company (required)"],["website","Website"],["contact_name","Contact name"],
- ["contact_email","Contact email"],["ats_slug","Job board slug"]];
+ ["contact_email","Contact email"],["phone","Phone"],["ats_slug","Job board slug"]];
 if("{{LOGOUT}}")$("logout").classList.remove("hidden");
 
 async function api(url,opts){const r=await fetch(url,opts);
@@ -293,6 +293,7 @@ async function loadRun(id){
   $("runMsg").innerHTML='<span class="err">'+esc(d.error||"Failed")+'</span>';ROWS=[];render();return}
  if(d.status==="running"){showRunning();return}
  ROWS=d.results;$("runTitle").textContent=d.label+" · "+d.created;
+ $("fFresh").value=d.mode==="list"?"":"3";  // your own list: show every company
  $("runMsg").textContent=ROWS.length+" leads found.";stats(ROWS,d.summary.new);
  $("dlLink").href="/runs/"+id+"/xlsx";$("doneBtns").classList.remove("hidden");$("filters").classList.remove("hidden");
  const needs=[...new Set(ROWS.flatMap(r=>r.needs))];
@@ -355,7 +356,7 @@ function render(){
    (r.newest===today()&&r.signals.some(s=>/^Asking/.test(s.label))?" <span class='pill HOT'>Posted today: reply now</span>":"")+
    (r.first_seen?"<div class='muted'>First found "+esc(r.first_seen)+"</div>":"")+
    (r.segment?"<div style='margin-top:3px'><span class='pill SMALL'>Small business / founder</span></div>":"")+
-   "<div class='muted'>"+esc(r.sources)+"</div></td><td data-l='Tier'><span class='pill "+r.tier+"'>"+r.tier+"</span></td>"+
+   "<div class='muted'>"+esc(r.sources)+"</div>"+contactLine(r)+"</td><td data-l='Tier'><span class='pill "+r.tier+"'>"+r.tier+"</span></td>"+
    "<td data-l='Score' class='sc'>"+r.score+"</td><td data-l='Needs'>"+(r.needs.map(n=>"<span class='need'>"+esc(n)+"</span>").join("")||"-")+"</td>"+
    "<td data-l='Signals'>"+r.count+(r.newest?" <span class='muted'>(latest "+esc(r.newest)+")</span>":"")+"</td><td data-l='Track'>"+esc(r.track)+"</td><td data-l='Status'>"+statusCell(r,i)+"</td><td>"+
    "<ul class='sig'>"+r.signals.slice(0,3).map(s=>"<li><b>"+esc(s.label)+"</b> "+(s.date?"("+esc(s.date)+") ":"")+
@@ -367,6 +368,10 @@ function render(){
     (r.person?(r.url?"<a class='ghost' href='"+esc(r.url)+"' target='_blank' rel='noopener'>Open post to reply</a>":""):
      "<a class='ghost' href='"+esc(gmail(r))+"' target='_blank' rel='noopener'>Open in Gmail</a>")+"</div></details>":"")+
    "</td></tr>"}).join("")+"</tbody>";}
+function contactLine(r){if(r.person||!(r.contact||r.to||r.phone))return "";
+ return "<div style='margin-top:4px;font-size:13px'>"+(r.contact?esc(r.contact)+"<br>":"")+
+  (r.to?"<a href='mailto:"+esc(r.to)+"'>"+esc(r.to)+"</a><br>":"")+
+  (r.phone?"<a href='tel:"+esc(r.phone.replace(/[^\d+]/g,""))+"'>Call "+esc(r.phone)+"</a>":"")+"</div>";}
 function copyEmail(i,btn){navigator.clipboard.writeText($("e"+i).innerText).then(()=>{btn.textContent="Copied";setTimeout(()=>btn.textContent="Copy",1500)})}
 
 async function openHistory(){const {d}=await api("/runs");

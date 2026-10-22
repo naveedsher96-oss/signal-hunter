@@ -82,6 +82,7 @@ def summarise(r):
             "newest": r["newest"], "sources": r.get("sources", ""),
             "new": r.get("any_new", False), "first_seen": r.get("first_seen", ""),
             "to": c.get("contact_email", ""), "website": c.get("website", ""),
+            "phone": c.get("phone", ""), "contact": c.get("contact_name", ""),
             "person": sh.is_person(c["company"]),
             "url": top["url"] if top else "", "email": r.get("email"),
             "signals": [{"label": s["label"], "detail": s["detail"], "url": s["url"],
