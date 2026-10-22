@@ -21,6 +21,8 @@ import mocks  # noqa: E402
 import signal_hunter as sh  # noqa: E402
 
 sh.http_get = mocks.http_get
+POSTS = []  # phone alerts "sent" during tests
+sh.http_post_json = lambda url, payload: POSTS.append((url, payload)) or True
 # No polite pauses between fake requests
 sh.time = types.SimpleNamespace(time=time.time, sleep=lambda s: None)
 
@@ -33,3 +35,9 @@ def cfg():
 @pytest.fixture
 def matchers(cfg):
     return sh.Matchers(cfg)
+
+
+@pytest.fixture
+def posts():
+    POSTS.clear()
+    return POSTS

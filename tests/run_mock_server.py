@@ -14,6 +14,7 @@ import mocks  # noqa: E402
 import signal_hunter as sh  # noqa: E402
 
 sh.http_get = mocks.http_get
+sh.http_post_json = lambda url, payload: print("ALERT", payload) or True  # no real alerts
 _orig = sh.with_defaults
 sh.with_defaults = lambda c: dict(_orig(c), delay_seconds=0)
 
