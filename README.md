@@ -7,9 +7,9 @@ Signal Hunter finds companies, small-business owners and new founders who have *
 
 ## What it does
 - **Scan my list:** upload an Excel or CSV file, or paste company names. You can save the list as your **saved list**, which is re-scanned every day.
-- **Find warm companies:** no list needed. It finds open Freelancer.com projects, Hacker News posts asking for help, and remote job posts. Reddit can be switched on once you have an API key.
+- **Find warm companies:** no list needed. It finds open Freelancer.com projects (with the owner's name, so bids greet a person), Craigslist gigs, Hacker News posts asking for help, remote job posts, and Google News about companies that just adopted a CRM, hired sales leaders or raised money. Reddit can be switched on once you have an API key.
 - **History:** every scan is saved, and each one comes with an Excel tracker to download (it opens showing your current pipeline status per lead).
-- **Pipeline:** mark each lead Contacted / Replied / Call booked / Proposal / Won / Dead; the **Pipeline** view shows the funnel and which follow-ups are due (4 days after Contacted).
+- **Pipeline:** mark each lead Contacted / Replied / Call booked / Proposal / Won / Dead; the **Pipeline** view shows the funnel and which follow-ups are due (4 days after Contacted). A source count under the results shows how much each site returned - a 0 means that source is down or blocked.
 
 Signals, points and keywords are explained in the app under **Profile & keywords**. Everything you set there is editable.
 

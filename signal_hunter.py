@@ -144,6 +144,12 @@ DEFAULT_FREELANCER_QUERIES = ["gohighlevel", "crm", "hubspot", "zoho", "salesfor
 DEFAULT_HN_KEYWORDS = ["gohighlevel", "virtual assistant", "crm", "revops",
                        "sales operations", "customer success", "data entry", "hubspot",
                        "salesforce admin", "zoho", "business development"]
+# Google News keyword searches: find companies that just adopted a CRM, hired
+# revenue leaders or raised money - all moments they need this kind of help.
+DEFAULT_NEWS_QUERIES = ["gohighlevel", "hubspot implementation", "zoho crm",
+                        "crm migration", "salesforce implementation",
+                        "appoints head of sales", "names chief revenue officer",
+                        "raises seed funding"]
 
 # Someone asking for help / hiring
 INTENT_RE = re.compile(
@@ -382,6 +388,8 @@ def with_defaults(cfg):
     cfg.setdefault("max_bids", 0)           # skip projects with more bids than this (0 = off)
     cfg.setdefault("max_ask_age_days", 14)  # asks older than this are usually filled (0 = off)
     cfg.setdefault("ntfy_topic", "")        # phone alerts for new HOT leads (ntfy.sh)
+    cfg.setdefault("news_queries", DEFAULT_NEWS_QUERIES)
+    cfg.setdefault("site_tech", True)       # check discovered sites for GHL/CRM tools
     return cfg
 
 
@@ -796,7 +804,25 @@ def freelancer_projects(query, n=50):
                     "url": f"https://www.freelancer.com/projects/{p.get('seo_url', '')}",
                     "date": to_date(p.get("time_submitted")), "budget": budget,
                     "worth": round((b.get("maximum") or 0) * rate * (20 if hourly else 1)),
-                    "bids": (p.get("bid_stats") or {}).get("bid_count")})
+                    "bids": (p.get("bid_stats") or {}).get("bid_count"),
+                    "owner": p.get("owner_id")})
+    return out
+
+
+def freelancer_owners(ids):
+    """Public owner profiles for project owner ids, one batched call.
+    -> {owner_id: {username, name, country}}."""
+    ids = [str(i) for i in dict.fromkeys(ids) if i]
+    if not ids:
+        return {}
+    d = http_get("https://www.freelancer.com/api/users/0.1/users/?"
+                 + "&".join(f"users[]={i}" for i in ids[:100]))
+    out = {}
+    for uid, u in (((d or {}).get("result") or {}).get("users") or {}).items():
+        out[int(uid)] = {
+            "username": u.get("username") or "",
+            "name": u.get("public_name") or u.get("username") or "",
+            "country": ((u.get("location") or {}).get("country") or {}).get("name", "")}
     return out
 
 
@@ -986,6 +1012,40 @@ def news_events(company, cats, lookback):
             break
     return list(best.values())
 
+
+def news_search(query, lookback):
+    """Google News RSS for a keyword query -> [(title, link, date, desc)]."""
+    q = urllib.parse.quote(f"{query} when:{lookback}d")
+    txt = http_get(f"https://news.google.com/rss/search?q={q}&hl=en-US&gl=US"
+                   f"&ceid=US:en", as_json=False)
+    return rss_items(txt)
+
+
+# "Acme Dental selects HubSpot ..." -> "Acme Dental". Only titles that name the
+# company BEFORE the action verb produce a lead.
+NEWS_VERBS = re.compile(
+    r"^(.{3,70}?)\s+(selects|chooses|adopts|deploys|implements|rolls out|"
+    r"switches to|migrates to|picks|hires|to hire|appoints|names|welcomes|"
+    r"raises|lands|secures|closes|launches|expands|enters|acquires|opens|"
+    r"brings on|hiring)\b", re.I)
+NEWS_JUNK = {"the", "a", "an", "report", "study", "survey", "analysis", "market",
+             "global", "new", "how", "why", "what", "top", "best", "exclusive",
+             "watch", "breaking", "opinion", "editorial", "research", "industry"}
+
+
+def news_company(title):
+    """Extract the company a headline is about, or '' when it's not a company
+    headline ("CRM market report", "How to choose a CRM")."""
+    t = re.split(r"\s[-–—|]\s", title or "")[0].strip()  # drop " - Publisher"
+    m = NEWS_VERBS.search(t)
+    if not m:
+        return ""
+    name = re.sub(r"^(a|an|the)\s+", "", m.group(1).strip(" '\""), flags=re.I).strip()
+    words = name.split()
+    if not name or len(words) > 5 or words[0].lower() in NEWS_JUNK:
+        return ""
+    return name if norm(name) else ""
+
 # --------------------------------------------------------- website / tech --
 
 def site_events(company, cats):
@@ -1105,11 +1165,15 @@ def scan_company(c, cfg, m, feed_jobs):
     return res
 
 
-def run(companies, cfg, on_progress=None, should_stop=lambda: False):
+def run(companies, cfg, on_progress=None, should_stop=lambda: False, stats=None):
     """Scan the user's own company list."""
+    stats = stats if stats is not None else {}
     m = Matchers(cfg)
     step = lambda msg: on_progress and on_progress(0, len(companies), msg, None)
     feed_jobs = load_feeds(step)
+    src = stats.setdefault("sources", {})
+    src["Companies on your list"] = len(companies)
+    src["Job boards"] = src.get("Job boards", 0) + len(feed_jobs)
     results = []
     for i, c in enumerate(companies, 1):
         if should_stop():
@@ -1130,19 +1194,24 @@ def run(companies, cfg, on_progress=None, should_stop=lambda: False):
     return results
 
 
-def discover(cfg, on_progress=None, should_stop=lambda: False):
+def discover(cfg, on_progress=None, should_stop=lambda: False, stats=None):
     """No list needed: find companies, founders and small-business owners who recently
-    asked for these services or described a problem these services fix."""
+    asked for these services or described a problem these services fix. `stats` (if
+    given) gets "sources": how many raw items each source fetched - a 0 means that
+    source is down or blocked."""
+    stats = stats if stats is not None else {}
+    src = stats.setdefault("sources", {})
     m = Matchers(cfg)
     cats = m.cats
     lb = cfg["lookback_days"]
     since = int((datetime.now() - timedelta(days=lb)).timestamp())
     subs = cfg["subreddits"] if cfg.get("use_reddit") else []
     kws, fl = cfg["hn_keywords"], cfg.get("freelancer_queries") or []
+    nq = cfg.get("news_queries") or DEFAULT_NEWS_QUERIES
     cl = ((len(cfg.get("craigslist_cities") or DEFAULT_CRAIGS_CITIES)
            * len(cfg.get("craigslist_queries") or DEFAULT_CRAIGS_QUERIES))
           if cfg.get("use_craigslist", True) else 0)
-    total = len(FEEDS) + len(subs) + len(kws) + len(fl) + cl
+    total = len(FEEDS) + len(subs) + len(kws) + len(fl) + cl + len(nq)
     done = [0]
     groups = {}
 
@@ -1155,7 +1224,7 @@ def discover(cfg, on_progress=None, should_stop=lambda: False):
     min_budget = float(cfg.get("min_budget_usd") or 0)
     max_bids = int(cfg.get("max_bids") or 0)
 
-    def add(company, e, website="", contact=""):
+    def add(company, e, website="", contact="", cname=""):
         if max_age and e["kind"] in ("ask", "struggle") and (days_ago(e["date"]) or 0) > max_age:
             return  # an old ask has usually been filled already
         key = norm(company) or company.lower()
@@ -1163,6 +1232,8 @@ def discover(cfg, on_progress=None, should_stop=lambda: False):
                                                 "ats_slug": "", "contact_name": "",
                                                 "contact_email": "", "link": contact},
                                     "events": []})
+        if cname and not g["company"]["contact_name"]:
+            g["company"]["contact_name"] = cname
         g["events"].append(e)
 
     # 1. Remote job boards
@@ -1174,6 +1245,7 @@ def discover(cfg, on_progress=None, should_stop=lambda: False):
             jobs = fn()
         except Exception:
             jobs = []
+        src["Job boards"] = src.get("Job boards", 0) + len(jobs)
         for j in jobs:
             if j["company"]:
                 for e in job_events([j], cats, j["source"], lb):
@@ -1185,7 +1257,9 @@ def discover(cfg, on_progress=None, should_stop=lambda: False):
         if should_stop():
             break
         step(f"Reddit r/{sub}")
-        for p in reddit_posts(f"/r/{sub}/new.json?limit=100"):
+        posts = reddit_posts(f"/r/{sub}/new.json?limit=100")
+        src["Reddit"] = src.get("Reddit", 0) + len(posts)
+        for p in posts:
             if not in_window(p["date"], lb):
                 continue
             r = classify_post(p["title"], p["text"], p["sub"] or sub, m)
@@ -1204,7 +1278,10 @@ def discover(cfg, on_progress=None, should_stop=lambda: False):
         if should_stop():
             break
         step(f"Freelancer.com: {query}")
-        for p in freelancer_projects(query):
+        projects = freelancer_projects(query)
+        src["Freelancer.com"] = src.get("Freelancer.com", 0) + len(projects)
+        owners = freelancer_owners([p["owner"] for p in projects])
+        for p in projects:
             if p["id"] in seen_projects or not in_window(p["date"], lb):
                 continue
             seen_projects.add(p["id"])
@@ -1218,14 +1295,17 @@ def discover(cfg, on_progress=None, should_stop=lambda: False):
             need = (categorize(full, cats) or m.pains(full) or [None])[0]
             if not need:
                 continue
+            o = owners.get(p["owner"]) or {}
+            who = (f"by {o['username']}" + (f", {o['country']}" if o["country"] else "")
+                   if o.get("username") else "")
             bids = f"{p['bids']} bids" if p["bids"] is not None else ""
-            extra = ", ".join(x for x in (p["budget"], bids) if x)
+            extra = ", ".join(x for x in (p["budget"], bids, who) if x)
             add(f"Freelancer.com project #{p['id']}",
                 ev("ask", need, "Freelancer.com", p["title"], p["url"], p["date"],
                    f"Freelancer.com: {p['title']}" + (f" ({extra})" if extra else ""),
                    segment=m.segment(full), post=p["text"][:600],
                    bonus=budget_bonus(p.get("worth"), p.get("bids"))),
-                contact=p["url"])
+                contact=p["url"], cname=o.get("name", ""))
         time.sleep(cfg.get("delay_seconds", 1))
 
     # 3b. Craigslist gigs: people asking for help, city by city (public RSS)
@@ -1240,7 +1320,9 @@ def discover(cfg, on_progress=None, should_stop=lambda: False):
                 txt = http_get(f"https://{city}.craigslist.org/search/ggg"
                                f"?format=rss&query={urllib.parse.quote(q)}"
                                f"&sort=date", as_json=False)
-                for title, link, date, desc in rss_items(txt):
+                items = rss_items(txt)
+                src["Craigslist"] = src.get("Craigslist", 0) + len(items)
+                for title, link, date, desc in items:
                     if link in seen_projects or not in_window(date, lb):
                         continue
                     seen_projects.add(link)
@@ -1257,12 +1339,36 @@ def discover(cfg, on_progress=None, should_stop=lambda: False):
                         contact=link)
                 time.sleep(cfg.get("delay_seconds", 1))
 
-    # 4. Hacker News: Who is hiring + asks
+    # 4. Google News: companies that just adopted a CRM, hired sales leaders
+    #    or raised money - moments when this kind of help is needed.
+    for q in nq:
+        if should_stop():
+            break
+        step(f"Google News: {q}")
+        items = news_search(q, lb)
+        src["Google News"] = src.get("Google News", 0) + len(items)
+        for title, link, date, desc in items:
+            if not in_window(date, lb):
+                continue
+            kind = next((k for k, rx in NEWS_RULES if rx.search(title)), None)
+            cat = categorize(title, cats)
+            if not kind or (kind == "hiring_news" and not cat):
+                continue
+            company = news_company(title)
+            if company:
+                add(company, ev(kind, cat[0] if cat else "Growth", "Google News",
+                                title, link, date, title),
+                    contact=link)
+        time.sleep(cfg.get("delay_seconds", 1))
+
+    # 5. Hacker News: Who is hiring + asks
     for kw in kws:
         if should_stop():
             break
         step(f"Hacker News: {kw}")
-        for c in hn_search(kw, since):
+        hits = hn_search(kw, since)
+        src["Hacker News"] = src.get("Hacker News", 0) + len(hits)
+        for c in hits:
             company, e = hn_event(c, m)
             if e and (e["kind"] != "mention"):
                 add(company, e, contact=c["url"])
@@ -1372,10 +1478,13 @@ def find_contacts(c):
 def enrich_contacts(results, cfg, on_progress=None, should_stop=lambda: False,
                     include_cold=False, limit=None):
     """Fill contact_email / contact_name on the top company leads, free, from their
-    own websites. Person leads keep 'reply on the post'."""
+    own websites. When a site is newly guessed, also check it for CRM/GHL tech and
+    re-score the lead with those signals. Person leads keep 'reply on the post'."""
     if not cfg.get("find_contacts", True):
         return
     limit = int(cfg.get("contact_limit", 20) if limit is None else limit)
+    cats = compile_categories(cfg) if cfg.get("site_tech", True) else {}
+    lb = cfg.get("lookback_days", 45)
     ranked = sorted(results, key=lambda r: r.get("score", 0), reverse=True)
     tried = 0
     for r in ranked:
@@ -1389,6 +1498,7 @@ def enrich_contacts(results, cfg, on_progress=None, should_stop=lambda: False,
         tried += 1
         if on_progress:
             on_progress(tried, limit, f"Finding contacts: {c['company']}", None)
+        guessed_site = not c.get("website")
         emails, name, dom = find_contacts(c)
         if dom and not c.get("website"):
             c["website"] = f"https://{dom}"
@@ -1396,7 +1506,23 @@ def enrich_contacts(results, cfg, on_progress=None, should_stop=lambda: False,
             c["contact_email"] = emails[0]
             if name and not c.get("contact_name"):
                 c["contact_name"] = name
+        # a freshly found site is worth a tech check: "runs GoHighLevel" is a
+        # signal in itself and makes the email stronger
+        if dom and guessed_site and cats:
+            extra = [e for e in site_events(c, cats)
+                     if (e["kind"], e["url"]) not in
+                     {(s["kind"], s["url"]) for s in r["signals"]}]
+            if extra:
+                new = analyse(c["company"], r["signals"] + extra, lb)
+                for k in ("signals", "score", "tier", "track", "remote_evidence",
+                          "needs", "segment", "intent_count", "newest", "top_role"):
+                    r[k] = new[k]
+                r["sources"] = ", ".join(sorted({e["source"]
+                                                 for e in r["signals"]}))
         time.sleep(max(0.5, cfg.get("delay_seconds", 1)))
+    # enrichment can raise scores - keep the output ordered
+    results.sort(key=lambda r: (r.get("score", 0), r.get("newest", "")),
+                 reverse=True)
 
 # ------------------------------------------------------------------ emails --
 
@@ -1591,7 +1717,9 @@ def build_bid(cfg, company, result):
     top = result["signals"][0] if result["signals"] else {}
     need = result["needs"][0] if result["needs"] else "CRM Automation"
     wins = SMALL_WINS.get(need, SMALL_WINS["CRM Automation"])
-    body = (f"Hi! Your project \"{top.get('title', '')[:90]}\" is exactly the work "
+    who = company.get("contact_name", "")
+    hello = f"Hi {first_name(who)}!" if who else "Hi!"
+    body = (f"{hello} Your project \"{top.get('title', '')[:90]}\" is exactly the work "
             f"I do.\n\nI'm a remote CRM & sales systems specialist with "
             f"{cfg['years']} years in B2B sales and hands-on builds in "
             f"{cfg['tools']}. {cfg['proof_point']}\n\n"

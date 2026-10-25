@@ -146,9 +146,29 @@ def test_freelancer_lead_gets_bid_draft(cfg, tmp_path):
     fl = next(r for r in results
               if r["company"]["company"].startswith("Freelancer.com"))
     body = fl["email"]["body"]
-    assert body.startswith("Hi!") and cfg["your_name"] in body
+    assert body.startswith("Hi Sam!") and cfg["your_name"] in body  # owner's name
     assert "GoHighLevel Agency" in fl["email"]["subject"]
     assert len(body) < 1200 and "Best regards" not in body
+    assert "roofpro" in fl["signals"][0]["detail"]  # who posted it, in the evidence
+
+
+def test_news_discovers_new_companies(cfg):
+    results = {r["company"]["company"]: r for r in sh.discover(cfg)}
+    hd = results["Harbor Dental"]  # two headlines: GHL adoption + seed funding
+    kinds = {s["kind"] for s in hd["signals"]}
+    assert {"crm_news", "funding"} <= kinds
+    # the contact finder found its site, and the site check saw the GHL script
+    assert "tech_ghl" in kinds
+    assert hd["company"]["contact_email"] == "amy.chen@harbordental.com"
+    assert not any("Top 5 CRM" in n for n in results)  # junk headline filtered
+
+
+def test_source_health_counts(cfg):
+    stats = {}
+    sh.discover(cfg, stats=stats)
+    src = stats["sources"]
+    assert src["Freelancer.com"] > 0 and src["Google News"] > 0
+    assert src["Reddit"] > 0 and src["Job boards"] > 0
 
 
 def test_followup_draft_mirrors_subject(cfg, tmp_path):

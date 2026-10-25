@@ -46,11 +46,24 @@ R={
  "news.google.com/rss/search?q=%22Deel%22":"""<rss><channel><item><title>Deel hiring 200 customer success staff as it expands in Asia</title><link>https://news/1</link><pubDate>%s</pubDate></item>
  <item><title>Deel raises $300M Series E</title><link>https://news/2</link><pubDate>%s</pubDate></item></channel></rss>"""%(rfc(12),rfc(30)),
  "freelancer.com/api/projects/0.1/projects/active/?query=gohighlevel":{"status":"success","result":{"projects":[
-   {"id":40778167,"title":"GoHighLevel Agency & Sub-Account Setup","seo_url":"go-high-level/GoHighLevel-Agency-Sub-Account-Setup","preview_description":"My agency runs on GoHighLevel and I need a specialist to set up pipelines","time_submitted":ep(2),"type":"hourly","currency":{"code":"USD"},"budget":{"minimum":10.0,"maximum":15.0},"bid_stats":{"bid_count":40}},
+   {"id":40778167,"owner_id":501,"title":"GoHighLevel Agency & Sub-Account Setup","seo_url":"go-high-level/GoHighLevel-Agency-Sub-Account-Setup","preview_description":"My agency runs on GoHighLevel and I need a specialist to set up pipelines","time_submitted":ep(2),"type":"hourly","currency":{"code":"USD"},"budget":{"minimum":10.0,"maximum":15.0},"bid_stats":{"bid_count":40}},
    {"id":40778168,"title":"Logo for bakery","seo_url":"logo/Logo-for-bakery","preview_description":"Need a cute logo","time_submitted":ep(1),"type":"fixed","currency":{"code":"USD"},"budget":{"minimum":30.0,"maximum":50.0},"bid_stats":{"bid_count":90}},
    {"id":40778169,"title":"Old GHL project","seo_url":"x/old","preview_description":"GoHighLevel funnels","time_submitted":ep(200),"type":"fixed","currency":{"code":"USD"},"budget":{"minimum":100.0,"maximum":200.0},"bid_stats":{"bid_count":5}}]}},
  "freelancer.com/api/projects/0.1/projects/active/?query=crm":{"status":"success","result":{"projects":[
-   {"id":40778167,"title":"GoHighLevel Agency & Sub-Account Setup","seo_url":"go-high-level/GoHighLevel-Agency-Sub-Account-Setup","preview_description":"My agency runs on GoHighLevel and I need a specialist to set up pipelines","time_submitted":ep(2),"type":"hourly","currency":{"code":"USD"},"budget":{"minimum":10.0,"maximum":15.0},"bid_stats":{"bid_count":40}}]}},
+   {"id":40778167,"owner_id":501,"title":"GoHighLevel Agency & Sub-Account Setup","seo_url":"go-high-level/GoHighLevel-Agency-Sub-Account-Setup","preview_description":"My agency runs on GoHighLevel and I need a specialist to set up pipelines","time_submitted":ep(2),"type":"hourly","currency":{"code":"USD"},"budget":{"minimum":10.0,"maximum":15.0},"bid_stats":{"bid_count":40}}]}},
+ "freelancer.com/api/users/0.1/users":{"status":"success","result":{"users":{
+   "501":{"id":501,"username":"roofpro","public_name":"Sam Roof","location":{"country":{"name":"United States"}}}}}},
+ "news.google.com/rss/search?q=gohighlevel":"""<rss><channel>
+  <item><title>Harbor Dental selects GoHighLevel for patient follow-ups - Health Daily</title>
+   <link>https://news/hd1</link><pubDate>%s</pubDate></item>
+  <item><title>Top 5 CRM trends to watch in 2026 - TechNews</title>
+   <link>https://news/junk1</link><pubDate>%s</pubDate></item></channel></rss>"""%(rfc(4),rfc(2)),
+ "news.google.com/rss/search?q=raises%20seed%20funding":"""<rss><channel>
+  <item><title>Harbor Dental raises seed funding to open more clinics - Startup Wire</title>
+   <link>https://news/hd2</link><pubDate>%s</pubDate></item></channel></rss>"""%rfc(6),
+ "https://harbordental.com":"""<html><title>Harbor Dental - family dentistry</title>
+  <script src='https://widgets.leadconnectorhq.com/loader.js'></script>
+  <a href="mailto:amy.chen@harbordental.com">email us</a></html>""",
  "jobicy.com/api/v2/remote-jobs":{"jobs":[{"companyName":"Peak Roofing","jobTitle":"GoHighLevel Automation Specialist","jobGeo":"Anywhere","url":"https://jobicy.com/jobs/1","pubDate":iso(3)}]},
  "workingnomads.com/api/exposed_jobs":[{"company_name":"River Clinics","title":"Zoho CRM Administrator","location":"Worldwide","url":"https://wn/1","pub_date":iso(3)}],
  "austin.craigslist.org/search/ggg?format=rss&query=virtual%20assistant":"""<rss><channel>

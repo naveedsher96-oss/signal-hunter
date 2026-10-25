@@ -43,7 +43,7 @@ EDITABLE = {"your_name", "headline", "email", "linkedin", "portfolio", "years", 
             "proof_point", "hiring_manager_titles", "lookback_days", "categories",
             "subreddits", "pain_signals", "smallbiz_words", "exclude_words",
             "freelancer_queries", "use_reddit", "min_budget_usd", "max_bids",
-            "max_ask_age_days", "ntfy_topic"}
+            "max_ask_age_days", "ntfy_topic", "news_queries"}
 NUMBERS = {"min_budget_usd": 100000, "max_bids": 1000, "max_ask_age_days": 180}
 
 app = Flask(__name__)
@@ -165,10 +165,13 @@ def run_one(mode, companies, label):
                     JOB["results"].append(summarise(res))
 
         stop = lambda: JOB["stop"]
+        stats = {}
         if mode == "discover":
-            results = sh.discover(cfg, on_progress=progress, should_stop=stop)
+            results = sh.discover(cfg, on_progress=progress, should_stop=stop,
+                                  stats=stats)
         else:
-            results = sh.run(companies, cfg, on_progress=progress, should_stop=stop)
+            results = sh.run(companies, cfg, on_progress=progress, should_stop=stop,
+                             stats=stats)
 
         seen = db.get_seen()
         before = set(seen)
@@ -182,7 +185,8 @@ def run_one(mode, companies, label):
         db.add_seen({k: v for k, v in seen.items() if k not in before})
         rows = [summarise(r) for r in results]
         tiers = {t: sum(r["tier"] == t for r in rows) for t in ("HOT", "WARM", "COLD")}
-        summary = {"label": label, "count": len(rows), "new": new, **tiers}
+        summary = {"label": label, "count": len(rows), "new": new, **tiers,
+                   "sources": stats.get("sources") or {}}
         db.finish_run(run_id, summary, rows, xlsx, name)
         try:
             alerted = notify_hot(rows, cfg)
