@@ -2,13 +2,6 @@
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Signal Hunter</title>
-<meta name="theme-color" content="#1f3a5f">
-<meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-title" content="Signal Hunter">
-<link rel="manifest" href="/manifest.json">
-<link rel="icon" href="/pwa/icon-192.png">
-<link rel="apple-touch-icon" href="/pwa/icon-180.png">
 <style>
 :root{--bg:#f4f6f9;--card:#fff;--ink:#16202c;--mute:#5f6b7a;--line:#dfe4ea;--soft:#f8fafc;
 --brand:#1f3a5f;--brand2:#2e5c8a;--on:#eef5fc;--hot:#c2410c;--hotbg:#ffedd5;--warm:#a16207;
@@ -377,6 +370,4 @@ async function saveProfile(){const b={proof_point:$("p_proof_point").value};PROF
 (async()=>{loadSaved();const {d}=await api("/status");
  if(d.state==="running"){showRunning();return}
  const {d:runs}=await api("/runs?limit=1");if(runs.length)loadRun(runs[0].id);})();
-
-if("serviceWorker" in navigator)navigator.serviceWorker.register("/sw.js");
 </script></body></html>

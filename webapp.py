@@ -27,8 +27,8 @@ import traceback
 import uuid
 from datetime import timedelta
 
-from flask import (Flask, Response, jsonify, redirect, request, send_file,
-                   send_from_directory, session, url_for)
+from flask import (Flask, Response, jsonify, redirect, request, send_file, session,
+                   url_for)
 
 import db
 import signal_hunter as sh
@@ -176,7 +176,7 @@ def saved_list_task():
 
 # -------------------------------------------------------------------- auth --
 
-PUBLIC = {"login", "healthz", "cron", "cron_status", "static", "manifest", "sw", "pwa"}
+PUBLIC = {"login", "healthz", "cron", "cron_status", "static"}
 
 
 @app.before_request
@@ -235,22 +235,6 @@ def logout():
 @app.route("/healthz")
 def healthz():
     return "ok"
-
-
-@app.route("/manifest.json", endpoint="manifest")
-def manifest():
-    return send_file(os.path.join(BASE, "pwa", "manifest.json"),
-                     mimetype="application/manifest+json")
-
-
-@app.route("/sw.js", endpoint="sw")
-def sw():
-    return send_file(os.path.join(BASE, "pwa", "sw.js"), mimetype="text/javascript")
-
-
-@app.route("/pwa/<path:name>", endpoint="pwa")
-def pwa(name):
-    return send_from_directory(os.path.join(BASE, "pwa"), name)
 
 # --------------------------------------------------------------------- api --
 

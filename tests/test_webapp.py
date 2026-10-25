@@ -70,14 +70,6 @@ def test_lead_status_roundtrip(client):
     assert "acme dental" not in client.get("/lead-statuses").get_json()
 
 
-def test_pwa_files_are_public(client):
-    # manifest/sw/icons must be reachable before login so install works
-    for url, kind in [("/manifest.json", "json"), ("/sw.js", "javascript"),
-                      ("/pwa/icon-192.png", "png")]:
-        r = client.get(url)
-        assert r.status_code == 200 and kind in r.mimetype
-
-
 def test_cron_scan_script_stores_runs():
     import cron_scan
     before = len(webapp.db.list_runs(100))

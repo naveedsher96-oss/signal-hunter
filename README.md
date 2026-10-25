@@ -52,8 +52,6 @@ From then on, the scan runs every **day at 8:00 AM Pakistan time**.
 
 Without a `.env` file the app still works, but it keeps its data in a local `signal_hunter.db` file instead of Supabase.
 
-**Optional - install it as an app:** open http://127.0.0.1:8765 in Chrome or Edge and click the install icon (&#8853; in a screen) at the right of the address bar. It becomes a real app window with its own icon - same look as the browser page.
-
 ### Reddit (optional, later)
 Reddit needs an approved API key. Once Reddit approves yours, add `REDDIT_CLIENT_ID` and `REDDIT_CLIENT_SECRET` as repository secrets (and to `.env`), then tick **Search Reddit** under **Profile & keywords**.
 
