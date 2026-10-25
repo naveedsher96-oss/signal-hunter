@@ -1567,6 +1567,27 @@ def build_bid(cfg, company, result):
             f"{cfg['your_name']}")
     return f"Bid for: {top.get('title', '')[:60]}", body
 
+
+def build_followup(cfg, company, result):
+    """Second-touch email - shorter and softer than the first. Called after
+    build_email, so it can mirror the original subject for threading."""
+    name = company["company"]
+    person = is_person(name)
+    need = result["needs"][0] if result["needs"] else "CRM Automation"
+    phrase = NEED_PHRASE.get(need, need.lower())
+    hello = (f"Hi {first_name(company['contact_name'])}," if company.get("contact_name")
+             else "Hi there," if person else "Hi [First name],")
+    orig = (result.get("email") or {}).get("subject", "")
+    subject = f"Re: {orig}" if orig else f"Quick follow-up - {phrase}"
+    who = "you" if person else name
+    body = (f"{hello}\n\nJust floating this back to the top of your inbox - I know "
+            f"how quickly things pile up.\n\nIf {phrase} is still on the list for "
+            f"{who}, I'm happy to take a first look and send 2-3 concrete "
+            f"suggestions, no strings. And if the timing's off, no worries - tell "
+            f"me and I'll check back in a few weeks.\n\n"
+            f"{cfg['your_name']}\n{cfg['email']}")
+    return subject, body
+
 # ------------------------------------------------------------------ output --
 
 HDR_FILL = PatternFill("solid", fgColor="1F3A5F")
@@ -1597,9 +1618,17 @@ LEAD_COLS = ["Company / lead", "Tier", "Score", "Track", "Needs", "Lead type",
              "Find hiring manager", "Status", "Sent date", "Follow-up date", "Notes"]
 
 
-def write_outputs(cfg, results, label="List", seen=None, out_dir=None, emails=True):
+STATUS_LABELS = {"contacted": "Contacted", "replied": "Replied", "call": "Call booked",
+                 "proposal": "Proposal sent", "won": "Won", "dead": "Dead"}
+
+
+def write_outputs(cfg, results, label="List", seen=None, out_dir=None, emails=True,
+                  statuses=None):
     """Build the Excel tracker. If `seen` (dict) is given it is updated in place and no
-    seen-file is touched (the web app stores it in the database)."""
+    seen-file is touched (the web app stores it in the database). `statuses` is the
+    app's lead_status map (lead key -> {status, sent}) so the tracker opens already
+    reflecting the pipeline."""
+    statuses = statuses or {}
     out_dir = out_dir or OUT_DIR
     email_dir = os.path.join(out_dir, "emails")
     os.makedirs(email_dir if emails else out_dir, exist_ok=True)
@@ -1645,6 +1674,15 @@ def write_outputs(cfg, results, label="List", seen=None, out_dir=None, emails=Tr
 
         top = r["signals"][0] if r["signals"] else None
         person = is_person(c["company"])
+        st = statuses.get(c["company"].lower()) or {}
+        status_txt = STATUS_LABELS.get(st.get("status"), st.get("status")) or (
+            "To contact" if r["tier"] != "COLD" else "Parked")
+        sent_val = ""
+        if st.get("sent"):
+            try:
+                sent_val = datetime.strptime(st["sent"][:10], "%Y-%m-%d").date()
+            except ValueError:
+                sent_val = st["sent"]
         li = "" if person else ("https://www.linkedin.com/search/results/people/?keywords="
                                    + urllib.parse.quote(f"{c['company']} " + cfg.get(
                                        "hiring_manager_titles", "Head of Sales")))
@@ -1656,7 +1694,7 @@ def write_outputs(cfg, results, label="List", seen=None, out_dir=None, emails=Tr
                       top["url"] if top else "", "NEW" if any_new else "", r["sources"],
                       c.get("contact_name", ""), c.get("contact_email", ""),
                       "Reply on the post" if person else "Search LinkedIn",
-                      "To contact" if r["tier"] != "COLD" else "Parked", "", "", ""])
+                      status_txt, sent_val, "", ""])
         row = leads.max_row
         leads.cell(row, 2).fill = PatternFill("solid", fgColor=TIER_FILL[r["tier"]])
         link(leads.cell(row, LEAD_COLS.index("Top signal link") + 1), top["url"] if top else "")
@@ -1672,6 +1710,9 @@ def write_outputs(cfg, results, label="List", seen=None, out_dir=None, emails=Tr
             else:
                 subject, body = build_email(cfg, c, r)
             r["email"] = {"subject": subject, "body": body}
+            if not c["company"].startswith("Freelancer.com"):
+                fs, fb = build_followup(cfg, c, r)
+                r["followup"] = {"subject": fs, "body": fb}
             em_ws.append([c["company"], r["tier"], c.get("contact_email") or (
                 "Reply on the post" if person else "[add email]"), subject, body])
             em_ws.cell(em_ws.max_row, 5).alignment = Alignment(wrap_text=True,

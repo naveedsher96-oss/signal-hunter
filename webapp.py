@@ -27,8 +27,8 @@ import traceback
 import uuid
 from datetime import timedelta
 
-from flask import (Flask, Response, jsonify, redirect, request, send_file, session,
-                   url_for)
+from flask import (Flask, Response, jsonify, redirect, request, send_file,
+                   send_from_directory, session, url_for)
 
 import db
 import signal_hunter as sh
@@ -79,6 +79,7 @@ def summarise(r):
             "new": r.get("any_new", False), "to": c.get("contact_email", ""),
             "person": sh.is_person(c["company"]),
             "url": top["url"] if top else "", "email": r.get("email"),
+            "followup": r.get("followup"),
             "signals": [{"label": s["label"], "detail": s["detail"], "url": s["url"],
                          "date": s["date"], "points": s["points"]}
                         for s in r["signals"][:6]]}
@@ -125,7 +126,8 @@ def run_one(mode, companies, label):
         before = set(seen)
         with tempfile.TemporaryDirectory() as td:
             path, new = sh.write_outputs(cfg, results, "Discover" if mode == "discover"
-                                         else "List", seen=seen, out_dir=td, emails=False)
+                                         else "List", seen=seen, out_dir=td, emails=False,
+                                         statuses=db.get_lead_statuses())
             with open(path, "rb") as f:
                 xlsx = f.read()
             name = os.path.basename(path)
@@ -174,7 +176,7 @@ def saved_list_task():
 
 # -------------------------------------------------------------------- auth --
 
-PUBLIC = {"login", "healthz", "cron", "cron_status", "static"}
+PUBLIC = {"login", "healthz", "cron", "cron_status", "static", "manifest", "sw", "pwa"}
 
 
 @app.before_request
@@ -233,6 +235,22 @@ def logout():
 @app.route("/healthz")
 def healthz():
     return "ok"
+
+
+@app.route("/manifest.json", endpoint="manifest")
+def manifest():
+    return send_file(os.path.join(BASE, "pwa", "manifest.json"),
+                     mimetype="application/manifest+json")
+
+
+@app.route("/sw.js", endpoint="sw")
+def sw():
+    return send_file(os.path.join(BASE, "pwa", "sw.js"), mimetype="text/javascript")
+
+
+@app.route("/pwa/<path:name>", endpoint="pwa")
+def pwa(name):
+    return send_from_directory(os.path.join(BASE, "pwa"), name)
 
 # --------------------------------------------------------------------- api --
 

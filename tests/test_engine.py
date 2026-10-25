@@ -151,6 +151,35 @@ def test_freelancer_lead_gets_bid_draft(cfg, tmp_path):
     assert len(body) < 1200 and "Best regards" not in body
 
 
+def test_followup_draft_mirrors_subject(cfg, tmp_path):
+    results = sh.discover(cfg)
+    sh.write_outputs(cfg, results, "Discover", seen={}, out_dir=str(tmp_path),
+                     emails=False)
+    comp = next(r for r in results
+                if not sh.is_person(r["company"]["company"]) and r.get("followup"))
+    assert comp["followup"]["subject"] == "Re: " + comp["email"]["subject"]
+    assert "floating this back" in comp["followup"]["body"]
+    fl = next(r for r in results
+              if r["company"]["company"].startswith("Freelancer.com"))
+    assert "followup" not in fl  # bids are answered on-platform, not emailed
+
+
+def test_tracker_shows_pipeline_status(cfg, tmp_path):
+    from openpyxl import load_workbook
+    companies = sh.load_companies(os.path.join(HERE, "sample_companies.xlsx"))
+    results = sh.run(companies, cfg)
+    path, _ = sh.write_outputs(cfg, results, "List", seen={}, out_dir=str(tmp_path),
+                               emails=False,
+                               statuses={"acme dental": {"status": "contacted",
+                                                         "sent": "2026-10-20"}})
+    leads = load_workbook(path)["Leads"]
+    col = {c.value: i for i, c in enumerate(leads[1])}
+    row = next(r for r in leads.iter_rows(min_row=2)
+               if r[0].value == "Acme Dental")
+    assert row[col["Status"]].value == "Contacted"
+    assert str(row[col["Sent date"]].value)[:10] == "2026-10-20"
+
+
 def test_contact_finder_fills_email(cfg):
     results = {r["company"]["company"]: r for r in sh.discover(cfg)}
     nim = results["Nimbus Realty"]

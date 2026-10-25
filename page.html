@@ -2,6 +2,13 @@
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Signal Hunter</title>
+<meta name="theme-color" content="#1f3a5f">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Signal Hunter">
+<link rel="manifest" href="/manifest.json">
+<link rel="icon" href="/pwa/icon-192.png">
+<link rel="apple-touch-icon" href="/pwa/icon-180.png">
 <style>
 :root{--bg:#f4f6f9;--card:#fff;--ink:#16202c;--mute:#5f6b7a;--line:#dfe4ea;--soft:#f8fafc;
 --brand:#1f3a5f;--brand2:#2e5c8a;--on:#eef5fc;--hot:#c2410c;--hotbg:#ffedd5;--warm:#a16207;
@@ -156,7 +163,8 @@ border-bottom:1px solid var(--line);flex-wrap:wrap}
   <select id="fNeed" onchange="render()"><option value="">All needs</option></select>
   <select id="fSeg" onchange="render()"><option value="">All lead types</option>
    <option value="small">Small businesses &amp; founders</option><option value="other">Other companies</option></select>
-  <label class="muted"><input type="checkbox" id="fNew" onchange="render()"> New only</label></div>
+  <label class="muted"><input type="checkbox" id="fNew" onchange="render()"> New only</label>
+  <label class="muted"><input type="checkbox" id="fCont" onchange="render()"> Hide contacted</label></div>
  <div class="scroll" style="margin-top:12px"><table id="results"></table></div>
 </section>
 
@@ -246,6 +254,7 @@ async function start(mode){
  if(!ok){alert(d.error);return}
  showRunning();if(mode==="list"&&body.save_list)loadSaved();}
 function showRunning(){["startBtn","discBtn","savedBtn"].forEach(b=>$(b).disabled=true);
+ api("/lead-statuses").then(({d})=>{LSTATUS=d||{};render()});
  $("runCard").classList.remove("hidden");$("doneBtns").classList.add("hidden");$("filters").classList.add("hidden");
  $("barWrap").classList.remove("hidden");$("stopBtn").classList.remove("hidden");
  $("runTitle").textContent="Starting...";ROWS=[];render();$("runCard").scrollIntoView({behavior:"smooth"});
@@ -282,8 +291,10 @@ async function loadRun(id){
  render();}
 
 function gmail(r){const e=r.email;return "https://mail.google.com/mail/?view=cm&fs=1&to="+enc(r.to||"")+"&su="+enc(e.subject)+"&body="+enc(e.body);}
+function mailto(e,to){return "mailto:"+(to||"")+"?subject="+enc(e.subject)+"&body="+enc(e.body);}
 const ST_OPTS=[["","New"],["contacted","Contacted"],["replied","Replied"],["call","Call booked"],
  ["proposal","Proposal sent"],["won","Won"],["dead","Dead"]];
+const ST_LABEL={contacted:"Contacted",replied:"Replied",call:"Call booked",proposal:"Proposal",won:"Won",dead:"Dead"};
 const stKey=r=>(r.company||"").toLowerCase();
 const today=()=>new Date().toISOString().slice(0,10);
 const daysSince=s=>s?(Date.now()-Date.parse(s+"T00:00:00"))/864e5:0;
@@ -315,23 +326,29 @@ async function openPipeline(){
  pipeDlg.showModal();}
 function render(){
  const order={HOT:0,WARM:1,COLD:2},ft=$("fTier").value,fn=$("fNeed").value,fnew=$("fNew").checked,fs=$("fSeg").value;
- const rows=ROWS.filter(r=>(!ft||r.tier===ft)&&(!fn||r.needs.includes(fn))&&(!fnew||r.new)&&(!fs||(fs==="small")===!!r.segment))
+ const fc=$("fCont").checked;
+ const rows=ROWS.filter(r=>(!ft||r.tier===ft)&&(!fn||r.needs.includes(fn))&&(!fnew||r.new)&&(!fs||(fs==="small")===!!r.segment)&&(!fc||!LSTATUS[stKey(r)]))
   .sort((a,b)=>order[a.tier]-order[b.tier]||b.score-a.score);
  window._rows=rows;
  $("results").innerHTML="<thead><tr><th>Lead</th><th>Tier</th><th>Score</th><th>Needs</th><th>Signals</th><th>Track</th><th>Status</th><th>Evidence &amp; email</th></tr></thead><tbody>"+
   rows.map((r,i)=>"<tr><td><b>"+esc(r.company)+"</b>"+(r.new?" <span class='pill NEW'>NEW</span>":"")+
+   ((LSTATUS[stKey(r)]||{}).status?" <span class='pill WARM'>"+esc(ST_LABEL[LSTATUS[stKey(r)].status]||LSTATUS[stKey(r)].status)+"</span>":"")+
    (r.segment?"<div style='margin-top:3px'><span class='pill SMALL'>Small business / founder</span></div>":"")+
    "<div class='muted'>"+esc(r.sources)+"</div></td><td data-l='Tier'><span class='pill "+r.tier+"'>"+r.tier+"</span></td>"+
    "<td data-l='Score' class='sc'>"+r.score+"</td><td data-l='Needs'>"+(r.needs.map(n=>"<span class='need'>"+esc(n)+"</span>").join("")||"-")+"</td>"+
    "<td data-l='Signals'>"+r.count+(r.newest?" <span class='muted'>(latest "+esc(r.newest)+")</span>":"")+"</td><td data-l='Track'>"+esc(r.track)+"</td><td data-l='Status'>"+statusCell(r,i)+"</td><td>"+
    "<ul class='sig'>"+r.signals.slice(0,3).map(s=>"<li><b>"+esc(s.label)+"</b> "+(s.date?"("+esc(s.date)+") ":"")+
     (s.url?"<a href='"+esc(s.url)+"' target='_blank' rel='noopener'>"+esc(s.detail)+"</a>":esc(s.detail))+"</li>").join("")+"</ul>"+
-   (r.email?"<details><summary>View email draft</summary><pre id='e"+i+"'><b>Subject:</b> "+esc(r.email.subject)+"\n\n"+esc(r.email.body)+"</pre>"+
-    "<div class='acts'><button class='ghost' onclick='copyEmail("+i+",this)'>Copy</button>"+
+   (r.email?"<details><summary>View "+(r.person?"reply draft":"email draft")+"</summary><pre id='e"+i+"'><b>Subject:</b> "+esc(r.email.subject)+"\n\n"+esc(r.email.body)+"</pre>"+
+    "<div class='acts'><button class='ghost' onclick='copyText(\"e"+i+"\",this)'>Copy</button>"+
     (r.person?(r.url?"<a class='ghost' href='"+esc(r.url)+"' target='_blank' rel='noopener'>Open post to reply</a>":""):
+     "<a class='ghost' href='"+esc(mailto(r.email,r.to))+"'>Open in Mail app</a>"+
      "<a class='ghost' href='"+esc(gmail(r))+"' target='_blank' rel='noopener'>Open in Gmail</a>")+"</div></details>":"")+
+   (r.followup?"<details><summary>Follow-up draft (send if no reply in ~4 days)</summary><pre id='f"+i+"'><b>Subject:</b> "+esc(r.followup.subject)+"\n\n"+esc(r.followup.body)+"</pre>"+
+    "<div class='acts'><button class='ghost' onclick='copyText(\"f"+i+"\",this)'>Copy</button>"+
+    "<a class='ghost' href='"+esc(mailto(r.followup,r.to))+"'>Open in Mail app</a></div></details>":"")+
    "</td></tr>").join("")+"</tbody>";}
-function copyEmail(i,btn){navigator.clipboard.writeText($("e"+i).innerText).then(()=>{btn.textContent="Copied";setTimeout(()=>btn.textContent="Copy",1500)})}
+function copyText(id,btn){navigator.clipboard.writeText($(id).innerText).then(()=>{btn.textContent="Copied";setTimeout(()=>btn.textContent="Copy",1500)})}
 
 async function openHistory(){const {d}=await api("/runs");
  $("histList").innerHTML=d.length?d.map(r=>"<div class='hist'><div><b>"+esc(r.label)+"</b><div class='muted'>"+esc(r.created)+
@@ -360,4 +377,6 @@ async function saveProfile(){const b={proof_point:$("p_proof_point").value};PROF
 (async()=>{loadSaved();const {d}=await api("/status");
  if(d.state==="running"){showRunning();return}
  const {d:runs}=await api("/runs?limit=1");if(runs.length)loadRun(runs[0].id);})();
+
+if("serviceWorker" in navigator)navigator.serviceWorker.register("/sw.js");
 </script></body></html>
