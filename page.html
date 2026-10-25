@@ -264,6 +264,7 @@ async function start(mode){
  if(!ok){alert(d.error);return}
  showRunning();if(mode==="list"&&body.save_list)loadSaved();}
 function showRunning(){["startBtn","discBtn","savedBtn"].forEach(b=>$(b).disabled=true);
+ api("/lead-statuses").then(({d})=>{LSTATUS=d||{};render()});
  $("runCard").classList.remove("hidden");$("doneBtns").classList.add("hidden");$("filters").classList.add("hidden");
  $("barWrap").classList.remove("hidden");$("stopBtn").classList.remove("hidden");
  $("runTitle").textContent="Starting...";ROWS=[];render();$("runCard").scrollIntoView({behavior:"smooth"});
@@ -301,9 +302,11 @@ async function loadRun(id){
  render();}
 
 function gmail(r){const e=r.email;return "https://mail.google.com/mail/?view=cm&fs=1&to="+enc(r.to||"")+"&su="+enc(e.subject)+"&body="+enc(e.body);}
+function mailto(e,to){return "mailto:"+(to||"")+"?subject="+enc(e.subject)+"&body="+enc(e.body);}
 const ST_OPTS=[["","New"],["contacted","Contacted"],["replied","Replied"],["call","Call booked"],
  ["proposal","Proposal sent"],["won","Won"],["dead","Dead"],["junk","Junk"]];
 const JUNK=["Off-topic","Too cheap","Region-locked","Competitor or job seeker","Spam or scam","Other"];
+const ST_LABEL={contacted:"Contacted",replied:"Replied",call:"Call booked",proposal:"Proposal",won:"Won",dead:"Dead",junk:"Junk"};
 const stKey=r=>(r.company||"").toLowerCase();
 // The saved status for a lead: by name, or by email / website / post link when the
 // same lead turns up under another name (so nobody is contacted twice).
@@ -353,6 +356,7 @@ function render(){
  window._rows=rows;
  $("results").innerHTML="<thead><tr><th>Lead</th><th>Tier</th><th>Score</th><th>Needs</th><th>Signals</th><th>Track</th><th>Status</th><th>Evidence &amp; email</th></tr></thead><tbody>"+
   rows.map((r,i)=>{const st=stOf(r);return "<tr><td><b>"+esc(r.company)+"</b>"+(r.new?" <span class='pill NEW'>NEW</span>":"")+
+   (st&&st.status?" <span class='pill WARM'>"+esc(ST_LABEL[st.status]||st.status)+"</span>":"")+
    (r.newest===today()&&r.signals.some(s=>/^Asking/.test(s.label))?" <span class='pill HOT'>Posted today: reply now</span>":"")+
    (r.first_seen?"<div class='muted'>First found "+esc(r.first_seen)+"</div>":"")+
    (r.segment?"<div style='margin-top:3px'><span class='pill SMALL'>Small business / founder</span></div>":"")+
@@ -363,16 +367,20 @@ function render(){
     (s.url?"<a href='"+esc(s.url)+"' target='_blank' rel='noopener'>"+esc(s.detail)+"</a>":esc(s.detail))+"</li>").join("")+"</ul>"+
    (st&&st.sent?"<div class='err' style='margin:4px 0'>You already contacted this lead on "+esc(st.sent)+
      (st.name&&st.name.toLowerCase()!==stKey(r)?" (as "+esc(st.name)+")":"")+".</div>":"")+
-   (r.email?"<details><summary>View email draft</summary><pre id='e"+i+"'><b>Subject:</b> "+esc(r.email.subject)+"\n\n"+esc(r.email.body)+"</pre>"+
-    "<div class='acts'><button class='ghost' onclick='copyEmail("+i+",this)'>Copy</button>"+
+   (r.email?"<details><summary>View "+(r.person?"reply draft":"email draft")+"</summary><pre id='e"+i+"'><b>Subject:</b> "+esc(r.email.subject)+"\n\n"+esc(r.email.body)+"</pre>"+
+    "<div class='acts'><button class='ghost' onclick='copyText(\"e"+i+"\",this)'>Copy</button>"+
     (r.person?(r.url?"<a class='ghost' href='"+esc(r.url)+"' target='_blank' rel='noopener'>Open post to reply</a>":""):
+     "<a class='ghost' href='"+esc(mailto(r.email,r.to))+"'>Open in Mail app</a>"+
      "<a class='ghost' href='"+esc(gmail(r))+"' target='_blank' rel='noopener'>Open in Gmail</a>")+"</div></details>":"")+
+   (r.followup?"<details><summary>Follow-up draft (send if no reply in ~4 days)</summary><pre id='f"+i+"'><b>Subject:</b> "+esc(r.followup.subject)+"\n\n"+esc(r.followup.body)+"</pre>"+
+    "<div class='acts'><button class='ghost' onclick='copyText(\"f"+i+"\",this)'>Copy</button>"+
+    "<a class='ghost' href='"+esc(mailto(r.followup,r.to))+"'>Open in Mail app</a></div></details>":"")+
    "</td></tr>"}).join("")+"</tbody>";}
 function contactLine(r){if(r.person||!(r.contact||r.to||r.phone))return "";
  return "<div style='margin-top:4px;font-size:13px'>"+(r.contact?esc(r.contact)+"<br>":"")+
   (r.to?"<a href='mailto:"+esc(r.to)+"'>"+esc(r.to)+"</a><br>":"")+
   (r.phone?"<a href='tel:"+esc(r.phone.replace(/[^\d+]/g,""))+"'>Call "+esc(r.phone)+"</a>":"")+"</div>";}
-function copyEmail(i,btn){navigator.clipboard.writeText($("e"+i).innerText).then(()=>{btn.textContent="Copied";setTimeout(()=>btn.textContent="Copy",1500)})}
+function copyText(id,btn){navigator.clipboard.writeText($(id).innerText).then(()=>{btn.textContent="Copied";setTimeout(()=>btn.textContent="Copy",1500)})}
 
 async function openHistory(){const {d}=await api("/runs");
  $("histList").innerHTML=d.length?d.map(r=>"<div class='hist'><div><b>"+esc(r.label)+"</b><div class='muted'>"+esc(r.created)+

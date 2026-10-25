@@ -85,6 +85,7 @@ def summarise(r):
             "phone": c.get("phone", ""), "contact": c.get("contact_name", ""),
             "person": sh.is_person(c["company"]),
             "url": top["url"] if top else "", "email": r.get("email"),
+            "followup": r.get("followup"),
             "signals": [{"label": s["label"], "detail": s["detail"], "url": s["url"],
                          "date": s["date"], "points": s["points"]}
                         for s in r["signals"][:6]],
@@ -173,7 +174,8 @@ def run_one(mode, companies, label):
         before = set(seen)
         with tempfile.TemporaryDirectory() as td:
             path, new = sh.write_outputs(cfg, results, "Discover" if mode == "discover"
-                                         else "List", seen=seen, out_dir=td, emails=False)
+                                         else "List", seen=seen, out_dir=td, emails=False,
+                                         statuses=db.get_lead_statuses())
             with open(path, "rb") as f:
                 xlsx = f.read()
             name = os.path.basename(path)

@@ -3,12 +3,13 @@
 Warm leads for remote **GoHighLevel, CRM automation, Sales/BD, Customer Success and VA/admin** work.
 Signal Hunter finds companies, small-business owners and new founders who have **publicly shown a need**, ranks them, and drafts an email that answers that specific need.
 
-**Nothing is ever sent automatically.** You review each draft, then send it with **Open in Gmail** or reply on the post.
+**Nothing is ever sent automatically.** You review each draft, then send it with **Open in Mail app** (your default mail program, on PC or phone), **Open in Gmail**, or reply on the post. Every lead also has a shorter **follow-up draft** for the second touch.
 
 ## What it does
 - **Scan my list:** upload an Excel or CSV file, or paste company names. You can save the list as your **saved list**, which is re-scanned every day.
 - **Find warm companies:** no list needed. It finds open Freelancer.com projects, Hacker News posts asking for help, and remote job posts. Reddit can be switched on once you have an API key.
-- **History:** every scan is saved, and each one comes with an Excel tracker to download.
+- **History:** every scan is saved, and each one comes with an Excel tracker to download (it opens showing your current pipeline status per lead).
+- **Pipeline:** mark each lead Contacted / Replied / Call booked / Proposal / Won / Dead; the **Pipeline** view shows the funnel and which follow-ups are due (4 days after Contacted).
 
 Signals, points and keywords are explained in the app under **Profile & keywords**. Everything you set there is editable.
 
