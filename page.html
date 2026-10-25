@@ -192,6 +192,7 @@ For Freelancer.com leads, bid on the project using the draft. For Reddit or Hack
  <div id="painGrid"></div>
  <label class="f" style="margin-top:10px">Words that mark a small business / new founder<textarea id="p_small"></textarea></label>
  <label class="f" style="margin-top:10px">Freelancer.com searches (comma-separated)<textarea id="p_fl"></textarea></label>
+ <label class="f" style="margin-top:10px">Google News searches (comma-separated)<textarea id="p_news"></textarea></label>
  <label style="display:block;margin-top:10px"><input type="checkbox" id="p_reddit"> Search Reddit (only works once Reddit approves your API key)</label>
  <label class="f" style="margin-top:10px">Subreddits to watch (comma-separated)<textarea id="p_subs"></textarea></label>
  <label class="f" style="margin-top:10px">Skip posts containing (job seekers, people selling services, "unpaid", "commission only")<textarea id="p_excl"></textarea></label>
@@ -295,7 +296,10 @@ async function loadRun(id){
  if(d.status==="running"){showRunning();return}
  ROWS=d.results;$("runTitle").textContent=d.label+" · "+d.created;
  $("fFresh").value=d.mode==="list"?"":"3";  // your own list: show every company
- $("runMsg").textContent=ROWS.length+" leads found.";stats(ROWS,d.summary.new);
+ const src=d.summary&&d.summary.sources;
+ $("runMsg").textContent=ROWS.length+" leads found."+
+  (src&&Object.keys(src).length?"  Sources: "+Object.entries(src).map(([k,v])=>k+" "+v).join(" · "):"");
+ stats(ROWS,d.summary.new);
  $("dlLink").href="/runs/"+id+"/xlsx";$("doneBtns").classList.remove("hidden");$("filters").classList.remove("hidden");
  const needs=[...new Set(ROWS.flatMap(r=>r.needs))];
  $("fNeed").innerHTML='<option value="">All needs</option>'+needs.map(n=>'<option>'+esc(n)+'</option>').join("");
@@ -398,13 +402,13 @@ async function openProfile(){const {d:c}=await api("/config");CATS=c.categories|
  $("profGrid").innerHTML=PROF.map(([k,l])=>'<label class="f">'+l+'<input type="text" id="p_'+k+'" value="'+esc(c[k])+'"></label>').join("");
  $("p_proof_point").value=c.proof_point||"";$("catGrid").innerHTML=listBox("cat",CATS);$("painGrid").innerHTML=listBox("pain",PAIN);
  $("p_small").value=(c.smallbiz_words||[]).join(", ");$("p_subs").value=(c.subreddits||[]).join(", ");$("p_excl").value=(c.exclude_words||[]).join(", ");
- $("p_fl").value=(c.freelancer_queries||[]).join(", ");$("p_reddit").checked=!!c.use_reddit;
+ $("p_fl").value=(c.freelancer_queries||[]).join(", ");$("p_news").value=(c.news_queries||[]).join(", ");$("p_reddit").checked=!!c.use_reddit;
  NUMS.forEach(k=>$("p_"+k).value=c[k]??0);$("p_ntfy_topic").value=c.ntfy_topic||"";$("profErr").textContent="";profile.showModal();}
 async function saveProfile(){const b={proof_point:$("p_proof_point").value};PROF.forEach(([k])=>b[k]=$("p_"+k).value);
  b.categories={};Object.keys(CATS).forEach((k,i)=>b.categories[k]=split($("cat"+i).value));
  b.pain_signals={};Object.keys(PAIN).forEach((k,i)=>b.pain_signals[k]=split($("pain"+i).value));
  b.smallbiz_words=split($("p_small").value);b.subreddits=split($("p_subs").value).map(s=>s.replace(/^r\//,""));b.exclude_words=split($("p_excl").value);
- b.freelancer_queries=split($("p_fl").value);b.use_reddit=$("p_reddit").checked;
+ b.freelancer_queries=split($("p_fl").value);b.news_queries=split($("p_news").value);b.use_reddit=$("p_reddit").checked;
  NUMS.forEach(k=>b[k]=$("p_"+k).value);b.ntfy_topic=$("p_ntfy_topic").value.trim();
  const {ok,d}=await api("/config",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)});
  if(!ok){$("profErr").textContent=d.error||"Could not save.";return}profile.close();}

@@ -84,6 +84,17 @@
   "find_contacts": true,
   "contact_limit": 20,
   "use_craigslist": true,
+  "site_tech": true,
+  "news_queries": [
+    "gohighlevel",
+    "hubspot implementation",
+    "zoho crm",
+    "crm migration",
+    "salesforce implementation",
+    "appoints head of sales",
+    "names chief revenue officer",
+    "raises seed funding"
+  ],
   "craigslist_cities": ["newyork", "sfbay", "losangeles", "chicago", "boston",
                       "austin", "seattle", "denver"],
   "craigslist_queries": ["virtual assistant", "crm", "data entry",
