@@ -256,6 +256,15 @@ def http_get(url, as_json=True, headers=None):
         return None
 
 
+def http_post_json(url, payload):
+    """POST a JSON body (phone alerts). Patched in tests like http_get."""
+    try:
+        r = SESSION.post(url, json=payload, headers=HEADERS, timeout=TIMEOUT)
+        return r.status_code < 300
+    except requests.RequestException:
+        return False
+
+
 def strip_html(s):
     return re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", " ", s or ""))).strip()
 
@@ -366,8 +375,13 @@ def with_defaults(cfg):
     cfg.setdefault("use_reddit", False)  # Reddit needs an approved API key; off until then
     cfg.setdefault("find_contacts", True)  # find emails on company sites (free)
     cfg.setdefault("contact_limit", 20)    # how many top leads to enrich per scan
+    cfg.setdefault("list_contact_limit", 100)  # Scan my list: look up this many companies
     cfg.setdefault("use_craigslist", True)  # Craigslist gigs via public RSS
     cfg.setdefault("delay_seconds", 1)
+    cfg.setdefault("min_budget_usd", 0)     # skip Freelancer.com projects below this (0 = off)
+    cfg.setdefault("max_bids", 0)           # skip projects with more bids than this (0 = off)
+    cfg.setdefault("max_ask_age_days", 14)  # asks older than this are usually filled (0 = off)
+    cfg.setdefault("ntfy_topic", "")        # phone alerts for new HOT leads (ntfy.sh)
     return cfg
 
 
@@ -412,6 +426,8 @@ COLUMN_HINTS = {
     "contact_name": ["contact_name", "contact", "contact name", "full name",
                      "first name", "person", "hiring manager"],
     "contact_email": ["contact_email", "email", "e-mail", "email address", "work email"],
+    "phone": ["phone", "phone number", "mobile", "telephone", "tel", "cell", "whatsapp",
+              "contact number"],
 }
 
 
@@ -438,7 +454,7 @@ def to_companies(rows, mapping):
         seen.add(name.lower())
         out.append({"company": name, "website": col(r, "website"),
                     "ats_slug": col(r, "ats_slug"), "contact_name": col(r, "contact_name"),
-                    "contact_email": col(r, "contact_email")})
+                    "contact_email": col(r, "contact_email"), "phone": col(r, "phone")})
     return out
 
 
@@ -767,7 +783,10 @@ def freelancer_projects(query, n=50):
     out = []
     for p in ((d or {}).get("result") or {}).get("projects") or []:
         b = p.get("budget") or {}
-        cur = (p.get("currency") or {}).get("code") or ""
+        currency = p.get("currency") or {}
+        cur = currency.get("code") or ""
+        # budgets come in many currencies; compare them in USD (0 = unknown)
+        rate = 1.0 if cur == "USD" else (currency.get("exchange_rate") or 0)
         hourly = p.get("type") == "hourly"
         budget = (f"{cur} {b.get('minimum'):g}-{b.get('maximum'):g}"
                   f"{'/hr' if hourly else ''}"
@@ -776,7 +795,7 @@ def freelancer_projects(query, n=50):
                     "text": p.get("preview_description") or "",
                     "url": f"https://www.freelancer.com/projects/{p.get('seo_url', '')}",
                     "date": to_date(p.get("time_submitted")), "budget": budget,
-                    "worth": (b.get("maximum") or 0) * (20 if hourly else 1),
+                    "worth": round((b.get("maximum") or 0) * rate * (20 if hourly else 1)),
                     "bids": (p.get("bid_stats") or {}).get("bid_count")})
     return out
 
@@ -1099,10 +1118,15 @@ def run(companies, cfg, on_progress=None, should_stop=lambda: False):
         res = scan_company(c, cfg, m, feed_jobs)
         results.append(res)
         print(f"{res['tier']} ({res['score']}) - {', '.join(res['needs'][:2]) or '-'}")
+        res["from_list"] = True
+        if not res["signals"]:
+            res["track"] = "Cold outreach (your list)"
         if on_progress:
             on_progress(i, len(companies), c["company"], res)
         time.sleep(cfg.get("delay_seconds", 1))
-    enrich_contacts(results, cfg, on_progress, should_stop)
+    # You chose these companies, so look up contacts for all of them, not just warm ones
+    enrich_contacts(results, cfg, on_progress, should_stop, include_cold=True,
+                    limit=int(cfg.get("list_contact_limit", 100)))
     return results
 
 
@@ -1127,7 +1151,13 @@ def discover(cfg, on_progress=None, should_stop=lambda: False):
         if on_progress:
             on_progress(done[0], total, label, None)
 
+    max_age = int(cfg.get("max_ask_age_days") or 0)
+    min_budget = float(cfg.get("min_budget_usd") or 0)
+    max_bids = int(cfg.get("max_bids") or 0)
+
     def add(company, e, website="", contact=""):
+        if max_age and e["kind"] in ("ask", "struggle") and (days_ago(e["date"]) or 0) > max_age:
+            return  # an old ask has usually been filled already
         key = norm(company) or company.lower()
         g = groups.setdefault(key, {"company": {"company": company, "website": website,
                                                 "ats_slug": "", "contact_name": "",
@@ -1178,6 +1208,10 @@ def discover(cfg, on_progress=None, should_stop=lambda: False):
             if p["id"] in seen_projects or not in_window(p["date"], lb):
                 continue
             seen_projects.add(p["id"])
+            if min_budget and p["worth"] and p["worth"] < min_budget:
+                continue
+            if max_bids and (p["bids"] or 0) > max_bids:
+                continue
             full = f"{p['title']} {p['text']}"
             if OFFER_RE.search(full) or (m.exclude and m.exclude.search(full)):
                 continue
@@ -1335,12 +1369,13 @@ def find_contacts(c):
     return emails[:3], name, dom
 
 
-def enrich_contacts(results, cfg, on_progress=None, should_stop=lambda: False):
+def enrich_contacts(results, cfg, on_progress=None, should_stop=lambda: False,
+                    include_cold=False, limit=None):
     """Fill contact_email / contact_name on the top company leads, free, from their
     own websites. Person leads keep 'reply on the post'."""
     if not cfg.get("find_contacts", True):
         return
-    limit = int(cfg.get("contact_limit", 20))
+    limit = int(cfg.get("contact_limit", 20) if limit is None else limit)
     ranked = sorted(results, key=lambda r: r.get("score", 0), reverse=True)
     tried = 0
     for r in ranked:
@@ -1349,7 +1384,7 @@ def enrich_contacts(results, cfg, on_progress=None, should_stop=lambda: False):
         c = r.get("company") or {}
         if c.get("contact_email") or is_person(c.get("company", "")):
             continue
-        if r.get("tier") == "COLD":
+        if r.get("tier") == "COLD" and not include_cold:
             continue
         tried += 1
         if on_progress:
@@ -1614,7 +1649,7 @@ def link(cell, url):
 LEAD_COLS = ["Company / lead", "Tier", "Score", "Track", "Needs", "Lead type",
              "Intent signals",
              "Newest signal", "Remote evidence", "Top signal", "Top signal link",
-             "New this run?", "Sources", "Contact name", "Contact email",
+             "New this run?", "Sources", "Contact name", "Contact email", "Phone",
              "Find hiring manager", "Status", "Sent date", "Follow-up date", "Notes"]
 
 
@@ -1666,17 +1701,19 @@ def write_outputs(cfg, results, label="List", seen=None, out_dir=None, emails=Tr
                 new_total += 1
                 any_new = True
             s["new"] = is_new
+            s["first_seen"] = seen[key]
             sig_ws.append([c["company"], s["label"], s["category"], s["source"],
                            s["points"], s["detail"], s["date"] or "-", s["url"],
                            "NEW" if is_new else ""])
             link(sig_ws.cell(sig_ws.max_row, 8), s["url"])
         r["any_new"] = any_new
+        r["first_seen"] = min((s["first_seen"] for s in r["signals"]), default="")
 
         top = r["signals"][0] if r["signals"] else None
         person = is_person(c["company"])
         st = statuses.get(c["company"].lower()) or {}
         status_txt = STATUS_LABELS.get(st.get("status"), st.get("status")) or (
-            "To contact" if r["tier"] != "COLD" else "Parked")
+            "To contact" if r["tier"] != "COLD" or r.get("from_list") else "Parked")
         sent_val = ""
         if st.get("sent"):
             try:
@@ -1692,7 +1729,7 @@ def write_outputs(cfg, results, label="List", seen=None, out_dir=None, emails=Tr
                       r["remote_evidence"],
                       f"{top['label']}: {top['detail']}" if top else "No signals found",
                       top["url"] if top else "", "NEW" if any_new else "", r["sources"],
-                      c.get("contact_name", ""), c.get("contact_email", ""),
+                      c.get("contact_name", ""), c.get("contact_email", ""), c.get("phone", ""),
                       "Reply on the post" if person else "Search LinkedIn",
                       status_txt, sent_val, "", ""])
         row = leads.max_row
@@ -1704,7 +1741,8 @@ def write_outputs(cfg, results, label="List", seen=None, out_dir=None, emails=Tr
         fu.number_format = "yyyy-mm-dd"
         leads.cell(row, LEAD_COLS.index("Sent date") + 1).number_format = "yyyy-mm-dd"
 
-        if r["tier"] != "COLD":
+        # Your own list: every company gets a draft, even with no signals yet
+        if r["tier"] != "COLD" or r.get("from_list"):
             if c["company"].startswith("Freelancer.com"):
                 subject, body = build_bid(cfg, c, r)
             else:
@@ -1724,8 +1762,8 @@ def write_outputs(cfg, results, label="List", seen=None, out_dir=None, emails=Tr
                 f.write(f"To: {c.get('contact_email') or '[add email]'}\n"
                         f"Subject: {subject}\n\n{body}\n")
 
-    style_sheet(leads, [30, 8, 7, 24, 30, 22, 9, 12, 26, 60, 14, 9, 22, 18, 26, 18, 12, 12,
-                        13, 30])
+    style_sheet(leads, [30, 8, 7, 24, 30, 22, 9, 12, 26, 60, 14, 9, 22, 18, 26, 16, 18, 12,
+                        12, 13, 30])
     style_sheet(sig_ws, [30, 28, 24, 22, 8, 80, 12, 14, 7])
     style_sheet(em_ws, [30, 8, 26, 50, 100])
     for row in leads.iter_rows(min_row=2):

@@ -39,7 +39,14 @@ The app creates its tables by itself on first start.
 2. Name: `DATABASE_URL`. Secret: the string from step 1. Click **Add secret**.
 3. Test it: open the **Actions** tab → **Daily scan** → **Run workflow**. It takes a few minutes, and the run turns green when it's done.
 
-From then on, the scan runs every **day at 8:00 AM Pakistan time**.
+From then on, "Find warm companies" runs **every 2 hours**, and your saved list is re-scanned once a day at about 8:15 AM Pakistan time. Scans older than 30 days are deleted automatically so the free database stays small (your lead statuses are kept).
+
+### Phone alerts for new HOT leads (free, optional)
+1. Install the free **ntfy** app (Android or iPhone). No account needed.
+2. In Signal Hunter, open **Profile & keywords** → **Phone alerts**, click **Make one for me**, then **Save**.
+3. In the ntfy app tap **+** and subscribe to that same topic name, then click **Send test alert**.
+
+Each scan then pushes every HOT lead it sees for the first time, unless you've already marked it. Keep the topic name private: anyone who knows it can read your alerts.
 
 > GitHub pauses scheduled runs if a repository has had no activity for 60 days. If that happens, re-enable the workflow in the Actions tab.
 

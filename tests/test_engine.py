@@ -223,3 +223,63 @@ def test_env_file_loader(tmp_path, monkeypatch):
     assert os.environ["SH_TEST_A"] == "one"
     assert os.environ["SH_TEST_B"] == "already set"
     monkeypatch.delenv("SH_TEST_A")
+
+
+def test_freelancer_budget_bids_and_age_filters(cfg, monkeypatch):
+    names = lambda c: {r["company"]["company"] for r in sh.discover(c)}
+    assert "Freelancer.com project #40778167" in names(cfg)  # USD 15/hr, 40 bids, 2 days
+    assert "Freelancer.com project #40778167" not in names(dict(cfg, min_budget_usd=500))
+    assert "Freelancer.com project #40778167" not in names(dict(cfg, max_bids=30))
+    assert "Freelancer.com project #40778167" not in names(dict(cfg, max_ask_age_days=1))
+    assert "Freelancer.com project #40778167" in names(dict(cfg, max_ask_age_days=0))  # off
+
+
+def test_freelancer_worth_is_in_usd(monkeypatch):
+    fake = {"result": {"projects": [{"id": 1, "title": "CRM", "type": "fixed",
+                                     "currency": {"code": "INR", "exchange_rate": 0.012},
+                                     "budget": {"minimum": 5000, "maximum": 10000}},
+                                    {"id": 2, "title": "CRM", "type": "fixed",
+                                     "currency": {"code": "XYZ"},
+                                     "budget": {"minimum": 50, "maximum": 100}}]}}
+    monkeypatch.setattr(sh, "http_get", lambda url, **k: fake)
+    worth = [p["worth"] for p in sh.freelancer_projects("crm")]
+    assert worth == [120, 0]  # INR 10,000 is about $120; unknown currency -> 0 (no filter)
+
+
+def test_first_seen_dates(cfg, tmp_path):
+    results = sh.discover(cfg)
+    seen = {}
+    sh.write_outputs(cfg, results, "T", seen=seen, out_dir=str(tmp_path), emails=False)
+    today = sh.datetime.now().strftime("%Y-%m-%d")
+    assert all(r["first_seen"] == today for r in results if r["signals"])
+    for r in results:
+        for s in r["signals"]:
+            seen[f"{r['company']['company'].lower()}|{s['kind']}|{s['url'] or s['detail'][:80]}"] = "2026-01-01"
+    sh.write_outputs(cfg, results, "T", seen=seen, out_dir=str(tmp_path), emails=False)
+    assert all(r["first_seen"] == "2026-01-01" and not r["any_new"]
+               for r in results if r["signals"])
+
+
+def test_list_scan_drafts_every_company_and_maps_phone(cfg, tmp_path, monkeypatch):
+    rows = [{"Business": "Quiet Co", "Phone Number": "+1 (555) 010-2000", "Email": ""},
+            {"Business": "Nimbus Realty", "Phone Number": "", "Email": ""}]
+    mapping = sh.guess_columns(list(rows[0]))
+    assert mapping["phone"] == "Phone Number" and mapping["company"] == "Business"
+    companies = sh.to_companies(rows, mapping)
+    assert companies[0]["phone"] == "+1 (555) 010-2000"
+    monkeypatch.setattr(sh, "find_contacts",
+                        lambda c: (["hello@quiet.co"], "", "quiet.co")
+                        if c["company"] == "Quiet Co" else ([], "", ""))
+    by = {r["company"]["company"]: r for r in sh.run(companies, cfg)}
+    quiet = by["Quiet Co"]
+    assert quiet["tier"] == "COLD" and quiet["track"] == "Cold outreach (your list)"
+    assert quiet["company"]["contact_email"] == "hello@quiet.co"  # looked up although COLD
+    sh.write_outputs(cfg, list(by.values()), "List", seen={}, out_dir=str(tmp_path),
+                     emails=False)
+    assert all(r.get("email") and r["email"]["body"] for r in by.values())
+
+
+def test_discover_still_skips_cold_drafts(cfg, tmp_path):
+    results = sh.discover(cfg)
+    sh.write_outputs(cfg, results, "D", seen={}, out_dir=str(tmp_path), emails=False)
+    assert all(not r.get("email") for r in results if r["tier"] == "COLD")

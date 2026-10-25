@@ -8,6 +8,7 @@ Tables:
   settings(k, v)            profile, keywords, saved company list (JSON)
   runs(id, ...)             every scan: summary, results (JSON) and the Excel file
   seen(k, d)                signals already reported, so NEW only flags fresh ones
+  lead_status(k, ...)       your pipeline stage per lead, plus ids (email, domain, link)
 """
 
 import json
@@ -86,6 +87,12 @@ def init():
     blob = "BYTEA" if IS_PG else "BLOB"
     for s in SCHEMA:
         execute(s.format(pk=pk, blob=blob))
+    # Columns added after the first release
+    try:
+        execute("ALTER TABLE lead_status ADD COLUMN " + ("IF NOT EXISTS " if IS_PG else "")
+                + "ids TEXT NOT NULL DEFAULT ''")
+    except Exception:
+        pass  # SQLite: the column already exists
 
 
 def now():
@@ -158,6 +165,14 @@ def get_run(run_id):
             "results": json.loads(r[6]) if r[6] else [], "error": r[7]}
 
 
+def prune_runs(days=30):
+    """Scans run every 2 hours; drop ones older than `days` so the free database
+    stays small. Lead statuses and the seen list are kept."""
+    from datetime import timedelta
+    cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M")
+    execute("DELETE FROM runs WHERE created < ? AND status <> ?", (cutoff, "running"))
+
+
 def get_run_xlsx(run_id):
     r = execute("SELECT xlsx, xlsx_name FROM runs WHERE id = ?", (run_id,), fetch="one")
     if not r or r[0] is None:
@@ -167,19 +182,21 @@ def get_run_xlsx(run_id):
 
 # ------------------------------------------------------------ lead status --
 
-def set_lead_status(k, name, status, sent, note):
-    execute("INSERT INTO lead_status (k, name, status, sent, note, updated) "
-            "VALUES (?, ?, ?, ?, ?, ?) "
+def set_lead_status(k, name, status, sent, note, ids=()):
+    """ids: other ways to recognise the same lead (email, website domain, post link),
+    so it isn't contacted twice when it turns up under another name."""
+    execute("INSERT INTO lead_status (k, name, status, sent, note, updated, ids) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT (k) DO UPDATE SET name = excluded.name, "
             "status = excluded.status, sent = excluded.sent, "
-            "note = excluded.note, updated = excluded.updated",
-            (k, name, status, sent, note, now()))
+            "note = excluded.note, updated = excluded.updated, ids = excluded.ids",
+            (k, name, status, sent, note, now(), json.dumps(list(ids))))
 
 
 def get_lead_statuses():
     return {r[0]: {"name": r[1], "status": r[2], "sent": r[3], "note": r[4],
-                   "updated": r[5]}
-            for r in execute("SELECT k, name, status, sent, note, updated "
+                   "updated": r[5], "ids": json.loads(r[6]) if r[6] else []}
+            for r in execute("SELECT k, name, status, sent, note, updated, ids "
                              "FROM lead_status", fetch="all") or []}
 
 

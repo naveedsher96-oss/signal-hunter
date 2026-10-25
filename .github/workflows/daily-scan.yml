@@ -1,14 +1,19 @@
-# Runs "Find warm companies" + re-scans your saved list every day, for free,
-# right here on GitHub. Results go to your Supabase database and appear under
-# History in the app on your computer.
-# Needs one repository secret (Settings > Secrets and variables > Actions):
-#   DATABASE_URL   your Supabase "Session pooler" connection string
+# Runs "Find warm companies" every 2 hours and re-scans your saved list once a day,
+# for free, right here on GitHub. Results go to your Supabase database and appear
+# under History in the app on your computer. New HOT leads buzz your phone (ntfy).
+# Repository secrets (Settings > Secrets and variables > Actions):
+#   DATABASE_URL   your Supabase "Session pooler" connection string (required)
+#   NTFY_TOPIC     your private ntfy topic for phone alerts (optional)
 name: Daily scan
 
 on:
   schedule:
-    - cron: "0 3 * * *"   # Daily 03:00 UTC = 08:00 in Pakistan
-  workflow_dispatch: {}    # lets you run it by hand from the Actions tab
+    - cron: "15 1-23/2 * * *"   # every 2 hours; the 03:15 UTC run (08:15 Pakistan) also scans your saved list
+  workflow_dispatch: {}          # lets you run it by hand from the Actions tab
+
+concurrency:
+  group: scan          # never two scans at once
+  cancel-in-progress: false
 
 jobs:
   scan:
@@ -23,6 +28,8 @@ jobs:
       - name: Run the daily scan
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          SCAN_SAVED_LIST: ${{ github.event_name == 'workflow_dispatch' && '1' || '' }}
           REDDIT_CLIENT_ID: ${{ secrets.REDDIT_CLIENT_ID }}
           REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
         run: |
