@@ -80,7 +80,17 @@
       "back office"
     ]
   },
-  "use_reddit": false,
+  "use_reddit": true,
+  "use_bluesky": true,
+  "bsky_queries": [
+    "need a virtual assistant",
+    "looking for a va",
+    "need a crm",
+    "gohighlevel",
+    "drowning in admin",
+    "need help with my crm",
+    "hiring an appointment setter"
+  ],
   "find_contacts": true,
   "contact_limit": 20,
   "use_craigslist": true,

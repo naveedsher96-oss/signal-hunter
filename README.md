@@ -7,7 +7,7 @@ Signal Hunter finds companies, small-business owners and new founders who have *
 
 ## What it does
 - **Scan my list:** upload an Excel or CSV file, or paste company names. You can save the list as your **saved list**, which is re-scanned every day.
-- **Find warm companies:** no list needed. It finds open Freelancer.com projects (with the owner's name, so bids greet a person), Craigslist gigs, Hacker News posts asking for help, remote job posts, and Google News about companies that just adopted a CRM, hired sales leaders or raised money. Reddit can be switched on once you have an API key.
+- **Find warm companies:** no list needed. It finds open Freelancer.com projects (with the owner's name, so bids greet a person), Craigslist gigs, Hacker News posts asking for help, remote job posts, Bluesky posts from owners describing problems, and Google News about companies that just adopted a CRM, hired sales leaders or raised money. Reddit works out of the box through its free public feeds.
 - **History:** every scan is saved, and each one comes with an Excel tracker to download (it opens showing your current pipeline status per lead).
 - **Pipeline:** mark each lead Contacted / Replied / Call booked / Proposal / Won / Dead; the **Pipeline** view shows the funnel and which follow-ups are due (4 days after Contacted). A source count under the results shows how much each site returned - a 0 means that source is down or blocked.
 
@@ -59,8 +59,8 @@ Each scan then pushes every HOT lead it sees for the first time, unless you've a
 
 Without a `.env` file the app still works, but it keeps its data in a local `signal_hunter.db` file instead of Supabase.
 
-### Reddit (optional, later)
-Reddit needs an approved API key. Once Reddit approves yours, add `REDDIT_CLIENT_ID` and `REDDIT_CLIENT_SECRET` as repository secrets (and to `.env`), then tick **Search Reddit** under **Profile & keywords**.
+### Reddit and Bluesky (no keys needed)
+Both are on by default and need no account. Reddit is read through its free public RSS feeds - Reddit sometimes blocks cloud IPs, so check the source counts under the results if "Reddit" shows 0 (running the app on your own computer usually works). If Reddit ever approves an API key, adding `REDDIT_CLIENT_ID`/`REDDIT_CLIENT_SECRET` to `.env` (and the GitHub secrets) automatically switches to the more reliable official API. Bluesky queries are editable under **Profile & keywords**.
 
 ---
 

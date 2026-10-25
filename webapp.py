@@ -43,7 +43,8 @@ EDITABLE = {"your_name", "headline", "email", "linkedin", "portfolio", "years", 
             "proof_point", "hiring_manager_titles", "lookback_days", "categories",
             "subreddits", "pain_signals", "smallbiz_words", "exclude_words",
             "freelancer_queries", "use_reddit", "min_budget_usd", "max_bids",
-            "max_ask_age_days", "ntfy_topic", "news_queries"}
+            "max_ask_age_days", "ntfy_topic", "news_queries", "use_bluesky",
+            "bsky_queries"}
 NUMBERS = {"min_budget_usd": 100000, "max_bids": 1000, "max_ask_age_days": 180}
 
 app = Flask(__name__)

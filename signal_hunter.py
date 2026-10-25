@@ -8,8 +8,10 @@ that need.
 
 Signals it collects (free, public sources only):
   * Asking for help    - Freelancer.com open projects, Hacker News comments and
-                         "Who is hiring" threads, Reddit posts (only with an
-                         approved Reddit API key and use_reddit on)
+                         "Who is hiring" threads, Reddit posts (public .rss
+                         feeds - no key needed - or OAuth when
+                         REDDIT_CLIENT_ID/SECRET exist) and Bluesky posts
+                         (public search, no key)
   * Job posts          - Greenhouse, Lever, Ashby, Workable, SmartRecruiters,
                          Recruitee boards + RemoteOK, Remotive, We Work Remotely,
                          Himalayas, Jobicy remote feeds
@@ -378,11 +380,13 @@ def with_defaults(cfg):
     cfg.setdefault("smallbiz_words", DEFAULT_SMALLBIZ)
     cfg.setdefault("exclude_words", DEFAULT_EXCLUDE)
     cfg.setdefault("freelancer_queries", DEFAULT_FREELANCER_QUERIES)
-    cfg.setdefault("use_reddit", False)  # Reddit needs an approved API key; off until then
+    cfg.setdefault("use_reddit", True)  # public .rss feeds need no key; OAuth creds are used when present
     cfg.setdefault("find_contacts", True)  # find emails on company sites (free)
     cfg.setdefault("contact_limit", 20)    # how many top leads to enrich per scan
     cfg.setdefault("list_contact_limit", 100)  # Scan my list: look up this many companies
     cfg.setdefault("use_craigslist", True)  # Craigslist gigs via public RSS
+    cfg.setdefault("use_bluesky", True)     # Bluesky public search needs no key
+    cfg.setdefault("bsky_queries", DEFAULT_BSKY_QUERIES)
     cfg.setdefault("delay_seconds", 1)
     cfg.setdefault("min_budget_usd", 0)     # skip Freelancer.com projects below this (0 = off)
     cfg.setdefault("max_bids", 0)           # skip projects with more bids than this (0 = off)
@@ -717,9 +721,21 @@ def feed_workingnomads():
         for j in d if isinstance(j, dict) and j.get("title")]
 
 
+def feed_arbeitnow():
+    """Free public job API (arbeitnow.com) - keep the remote posts only."""
+    d = http_get("https://www.arbeitnow.com/api/job-board-api")
+    if not d:
+        return []
+    return [{"company": j.get("company_name", ""), **_job(
+        j.get("title"), "Worldwide", "Remote", j.get("url"),
+        j.get("created_at")), "source": "Arbeitnow"}
+        for j in d.get("data") or [] if j.get("remote") and j.get("title")]
+
+
 FEEDS = [("RemoteOK", feed_remoteok), ("Remotive", feed_remotive),
          ("We Work Remotely", feed_wwr), ("Himalayas", feed_himalayas),
-         ("Jobicy", feed_jobicy), ("Working Nomads", feed_workingnomads)]
+         ("Jobicy", feed_jobicy), ("Working Nomads", feed_workingnomads),
+         ("Arbeitnow", feed_arbeitnow)]
 
 
 def load_feeds(on_step=None):
@@ -781,6 +797,71 @@ def reddit_posts(path):
                     "date": to_date(p.get("created_utc")), "sub": p.get("subreddit", ""),
                     "author": p.get("author", ""), "flair": p.get("link_flair_text") or ""})
     return out
+
+
+_ATOM = "{http://www.w3.org/2005/Atom}"
+
+
+def _reddit_json_ok():
+    return bool(os.environ.get("REDDIT_CLIENT_ID") and
+                os.environ.get("REDDIT_CLIENT_SECRET"))
+
+
+def reddit_rss(url):
+    """Public .rss (Atom) feed - no API key needed. Reddit sometimes blocks
+    cloud IPs; the source-health count shows 0 when that happens."""
+    txt = http_get(url, as_json=False)
+    if not txt:
+        return []
+    try:
+        root = ET.fromstring(txt.encode("utf-8") if isinstance(txt, str) else txt)
+    except ET.ParseError:
+        return []
+    out = []
+    for it in root.findall(f".//{_ATOM}entry"):
+        le = it.find(f"{_ATOM}link")
+        link = le.get("href", "") if le is not None else ""
+        a = it.find(f"{_ATOM}author/{_ATOM}name")
+        author = (a.text or "").removeprefix("/u/") if a is not None else ""
+        sub = re.search(r"/r/([^/]+)/", link)
+        out.append({"title": (it.findtext(f"{_ATOM}title") or "").strip(),
+                    "text": strip_html(it.findtext(f"{_ATOM}content") or ""),
+                    "url": link,
+                    "date": to_date(it.findtext(f"{_ATOM}updated") or
+                                    it.findtext(f"{_ATOM}published") or ""),
+                    "sub": sub.group(1) if sub else "",
+                    "author": author, "flair": ""})
+    return out
+
+
+def reddit_new(sub):
+    """Newest posts of a subreddit - OAuth when configured, else public RSS."""
+    if _reddit_json_ok():
+        return reddit_posts(f"/r/{sub}/new.json?limit=100")
+    return reddit_rss(f"https://www.reddit.com/r/{sub}/new.rss?limit=100")
+
+
+def bluesky_posts(query, n=25):
+    """Public Bluesky search - free, no key or login needed."""
+    q = urllib.parse.quote(query)
+    d = http_get("https://public.api.bsky.app/xrpc/app.bsky.feed.searchPosts"
+                 f"?q={q}&sort=latest&limit={n}")
+    out = []
+    for p in (d or {}).get("posts") or []:
+        rec, a = p.get("record") or {}, p.get("author") or {}
+        rkey = (p.get("uri") or "").rpartition("/")[-1]
+        who = a.get("did") or a.get("handle") or ""
+        out.append({"text": rec.get("text") or "", "author": a.get("handle") or "",
+                    "name": a.get("displayName") or "",
+                    "url": f"https://bsky.app/profile/{who}/post/{rkey}"
+                           if rkey and who else "",
+                    "date": to_date(rec.get("indexedAt") or p.get("indexedAt"))})
+    return out
+
+
+DEFAULT_BSKY_QUERIES = ["need a virtual assistant", "looking for a va",
+                        "need a crm", "gohighlevel", "drowning in admin",
+                        "need help with my crm", "hiring an appointment setter"]
 
 
 def freelancer_projects(query, n=50):
@@ -912,7 +993,11 @@ def classify_post(title, text, sub, m):
 
 def reddit_company(company, m, lookback):
     q = urllib.parse.quote(f'"{company}"')
-    posts = reddit_posts(f"/search.json?q={q}&sort=new&t=year&limit=50")
+    if _reddit_json_ok():
+        posts = reddit_posts(f"/search.json?q={q}&sort=new&t=year&limit=50")
+    else:
+        posts = reddit_rss(f"https://www.reddit.com/search.rss?q={q}"
+                           "&sort=new&limit=50")
     nre, out = name_regex(company), []
     for p in posts:
         full = f"{p['title']} {p['text']}"
@@ -1208,10 +1293,12 @@ def discover(cfg, on_progress=None, should_stop=lambda: False, stats=None):
     subs = cfg["subreddits"] if cfg.get("use_reddit") else []
     kws, fl = cfg["hn_keywords"], cfg.get("freelancer_queries") or []
     nq = cfg.get("news_queries") or DEFAULT_NEWS_QUERIES
+    bs = ((cfg.get("bsky_queries") or DEFAULT_BSKY_QUERIES)
+          if cfg.get("use_bluesky", True) else [])
     cl = ((len(cfg.get("craigslist_cities") or DEFAULT_CRAIGS_CITIES)
            * len(cfg.get("craigslist_queries") or DEFAULT_CRAIGS_QUERIES))
           if cfg.get("use_craigslist", True) else 0)
-    total = len(FEEDS) + len(subs) + len(kws) + len(fl) + cl + len(nq)
+    total = len(FEEDS) + len(subs) + len(kws) + len(fl) + cl + len(nq) + len(bs)
     done = [0]
     groups = {}
 
@@ -1257,7 +1344,7 @@ def discover(cfg, on_progress=None, should_stop=lambda: False, stats=None):
         if should_stop():
             break
         step(f"Reddit r/{sub}")
-        posts = reddit_posts(f"/r/{sub}/new.json?limit=100")
+        posts = reddit_new(sub)
         src["Reddit"] = src.get("Reddit", 0) + len(posts)
         for p in posts:
             if not in_window(p["date"], lb):
@@ -1266,7 +1353,8 @@ def discover(cfg, on_progress=None, should_stop=lambda: False, stats=None):
             if not r or r[0] not in ("ask", "struggle"):
                 continue
             s_ = p["sub"] or sub
-            add(f"Reddit r/{s_} - u/{p['author']}",
+            who = f"u/{p['author']}" if p["author"] else p["title"][:50]
+            add(f"Reddit r/{s_} - {who}",
                 ev(r[0], r[1], f"Reddit r/{s_}", p["title"], p["url"], p["date"],
                    f"r/{s_}: {p['title']}", segment=r[2], post=p["text"][:600]),
                 contact=p["url"])
@@ -1361,7 +1449,27 @@ def discover(cfg, on_progress=None, should_stop=lambda: False, stats=None):
                     contact=link)
         time.sleep(cfg.get("delay_seconds", 1))
 
-    # 5. Hacker News: Who is hiring + asks
+    # 5. Bluesky: public search, no key - owners describing problems
+    for q in bs:
+        if should_stop():
+            break
+        step(f"Bluesky: {q}")
+        posts = bluesky_posts(q)
+        src["Bluesky"] = src.get("Bluesky", 0) + len(posts)
+        for p in posts:
+            if not in_window(p["date"], lb):
+                continue
+            r = classify_post(p["text"], "", "", m)
+            if not r or r[0] not in ("ask", "struggle"):
+                continue
+            name = f"Bluesky - @{p['author']}"
+            add(name, ev(r[0], r[1], "Bluesky", p["text"][:120], p["url"],
+                         p["date"], f"@{p['author']}: {p['text'][:180]}",
+                         segment=r[2], post=p["text"][:600]),
+                contact=p["url"])
+        time.sleep(cfg.get("delay_seconds", 1))
+
+    # 6. Hacker News: Who is hiring + asks
     for kw in kws:
         if should_stop():
             break
@@ -1597,7 +1705,8 @@ PAIN_OPENER = {
 }
 
 
-PERSON_PREFIXES = ("Reddit ", "HN user ", "Freelancer.com ", "Craigslist ")
+PERSON_PREFIXES = ("Reddit ", "HN user ", "Freelancer.com ", "Craigslist ",
+                   "Bluesky ")
 
 
 def is_person(name):
