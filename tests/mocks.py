@@ -6,6 +6,12 @@ ep=lambda d: int((now-timedelta(days=d)).timestamp())
 rfc=lambda d: (now-timedelta(days=d)).strftime("%a, %d %b %Y %H:%M:%S GMT")
 def rpost(title,sub,author,days,text=""):
     return {"data":{"title":title,"selftext":text,"subreddit":sub,"author":author,"created_utc":ep(days),"permalink":f"/r/{sub}/comments/x{abs(hash(title))%99999}/"}}
+def rentry(title,sub,author,days,text=""):
+    return (f"<entry><author><name>/u/{author}</name></author><title>{title}</title>"
+            f"<link href='https://www.reddit.com/r/{sub}/comments/x{abs(hash(title))%99999}/'/>"
+            f"<updated>{iso(days)}</updated><content type='html'>{text}</content></entry>")
+def rfeed(*entries):
+    return "<feed xmlns='http://www.w3.org/2005/Atom'>" + "".join(entries) + "</feed>"
 R={
  "boards-api.greenhouse.io/v1/boards/gitlab/jobs":{"jobs":[
    {"title":"Senior Revenue Operations Analyst","location":{"name":"Remote, Worldwide"},"absolute_url":"https://job/gl1","updated_at":iso(5)},
@@ -18,28 +24,36 @@ R={
    {"company":"Somecorp","position":"Rust Engineer","location":"Worldwide","url":"https://remoteok.com/3","date":iso(1)}],
  "remotive.com/api/remote-jobs":{"jobs":[{"company_name":"Nimbus Realty","title":"Virtual Assistant (Data Entry & CRM)","candidate_required_location":"Worldwide","url":"https://remotive.com/1","publication_date":iso(4)}]},
  "himalayas.app/jobs/api":{"jobs":[{"companyName":"Close","title":"Account Executive","locationRestrictions":[],"applicationLink":"https://himalayas.app/1","pubDate":ep(12)}]},
- "/r/forhire/new.json":{"data":{"children":[
-   rpost("[Hiring] GoHighLevel VA needed for our marketing agency - $15/hr","forhire","agencyowner22",3,"Need someone to manage pipelines and automations in GHL."),
-   rpost("[For Hire] Experienced virtual assistant available","forhire","va_pro",1),
-   rpost("[Hiring] Logo designer","forhire","x",2)]}},
- "/r/gohighlevel/new.json":{"data":{"children":[
-   rpost("Looking for someone to build GHL snapshots and workflows for my roofing clients","gohighlevel","roofpro",9),
-   rpost("How do I change my favicon?","gohighlevel","newbie",2)]}},
- "/r/smallbusiness/new.json":{"data":{"children":[
-   rpost("Need a virtual assistant for data entry - where do I find one?","smallbusiness","bakery_mia",20),
-   rpost("Old post: need a CRM","smallbusiness","old",120)]}},
- "/r/Entrepreneur/new.json":{"data":{"children":[
-   rpost("Just launched my cleaning business 3 months ago - how do I get clients? Sales are slow","Entrepreneur","sparkle_clean",4),
-   rpost("Motivational quote of the day","Entrepreneur","q",1)]}},
- "/r/sweatystartup/new.json":{"data":{"children":[
-   rpost("Tracking leads in a spreadsheet and they keep falling through the cracks","sweatystartup","hvac_joe",7,"Small HVAC shop, 3 techs. Missed calls = lost jobs.")]}},
- "/r/Solopreneur/new.json":{"data":{"children":[
-   rpost("Burnt out doing everything myself - is it time for my first hire?","Solopreneur","coach_amy",2)]}},
+ "/r/forhire/new.rss":rfeed(
+   rentry("[Hiring] GoHighLevel VA needed for our marketing agency - $15/hr","forhire","agencyowner22",3,"Need someone to manage pipelines and automations in GHL."),
+   rentry("[For Hire] Experienced virtual assistant available","forhire","va_pro",1),
+   rentry("[Hiring] Logo designer","forhire","x",2)),
+ "/r/gohighlevel/new.rss":rfeed(
+   rentry("Looking for someone to build GHL snapshots and workflows for my roofing clients","gohighlevel","roofpro",9),
+   rentry("How do I change my favicon?","gohighlevel","newbie",2)),
+ "/r/smallbusiness/new.rss":rfeed(
+   rentry("Need a virtual assistant for data entry - where do I find one?","smallbusiness","bakery_mia",20),
+   rentry("Old post: need a CRM","smallbusiness","old",120)),
+ "/r/Entrepreneur/new.rss":rfeed(
+   rentry("Just launched my cleaning business 3 months ago - how do I get clients? Sales are slow","Entrepreneur","sparkle_clean",4),
+   rentry("Motivational quote of the day","Entrepreneur","q",1)),
+ "/r/sweatystartup/new.rss":rfeed(
+   rentry("Tracking leads in a spreadsheet and they keep falling through the cracks","sweatystartup","hvac_joe",7,"Small HVAC shop, 3 techs. Missed calls = lost jobs.")),
+ "/r/Solopreneur/new.rss":rfeed(
+   rentry("Burnt out doing everything myself - is it time for my first hire?","Solopreneur","coach_amy",2)),
  "https://bloomflorist.com":"<html><link href='https://static1.squarespace.com/x.css'></html>",
- "reddit.com/search.json?q=%22Bloom%20Florist%22":{"data":{"children":[
-   rpost("Bloom Florist owner here: we keep losing leads from Instagram DMs","smallbusiness","bloom_owner",10)]}},
- "reddit.com/search.json?q=%22Acme%20Dental%22":{"data":{"children":[
-   rpost("Acme Dental is looking for a GoHighLevel expert to set up our booking workflows","dentistry","acme_mgr",6)]}},
+ "reddit.com/search.rss?q=%22Bloom%20Florist%22":rfeed(
+   rentry("Bloom Florist owner here: we keep losing leads from Instagram DMs","smallbusiness","bloom_owner",10)),
+ "reddit.com/search.rss?q=%22Acme%20Dental%22":rfeed(
+   rentry("Acme Dental is looking for a GoHighLevel expert to set up our booking workflows","dentistry","acme_mgr",6)),
+ "bsky.feed.searchPosts?q=need%20a%20virtual%20assistant":{"posts":[
+  {"uri":"at://did:plc:aaa/app.bsky.feed.post/3k1","author":{"did":"did:plc:aaa","handle":"salonowner.bsky.social","displayName":"Salon Owner"},
+   "record":{"text":"Drowning in admin - I need a virtual assistant for bookings and inbox, any recommendations?","indexedAt":iso(3)}},
+  {"uri":"at://did:plc:bbb/app.bsky.feed.post/9z2","author":{"did":"did:plc:bbb","handle":"dev.bsky.social"},
+   "record":{"text":"I offer virtual assistant services, DM me","indexedAt":iso(1)}}]},
+ "arbeitnow.com/api/job-board-api":{"data":[
+  {"title":"Zoho CRM Specialist","company_name":"Klarheit GmbH","remote":True,"url":"https://arbeitnow.com/1","created_at":ep(4),"location":"Berlin"},
+  {"title":"Office Assistant","company_name":"Berlin Shop","remote":False,"url":"https://arbeitnow.com/2","created_at":ep(2),"location":"Berlin"}]},
  "hn.algolia.com/api/v1/search_by_date?query=virtual%20assistant":{"hits":[
    {"objectID":"111","comment_text":"Nimbus Realty | Virtual Assistant &amp; CRM data entry | REMOTE (Worldwide) | Full-time<p>We use HubSpot...","story_title":"Ask HN: Who is hiring? (October 2026)","author":"nimbus","created_at":iso(15)},
    {"objectID":"112","comment_text":"Freelancer | Virtual assistant | Remote | I offer admin help","story_title":"Ask HN: Freelancer? Seeking freelancer? (October 2026)","author":"me","created_at":iso(3)}]},

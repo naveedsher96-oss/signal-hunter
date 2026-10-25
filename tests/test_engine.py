@@ -169,6 +169,7 @@ def test_source_health_counts(cfg):
     src = stats["sources"]
     assert src["Freelancer.com"] > 0 and src["Google News"] > 0
     assert src["Reddit"] > 0 and src["Job boards"] > 0
+    assert src["Bluesky"] > 0 and src["Craigslist"] > 0
 
 
 def test_followup_draft_mirrors_subject(cfg, tmp_path):
@@ -225,13 +226,22 @@ def test_new_sources(cfg):
     assert sh.is_person("Craigslist austin - x")  # reply on the post, not an email
 
 
-def test_reddit_is_off_by_default(cfg):
+def test_reddit_can_be_switched_off(cfg):
     off = dict(cfg)
-    del off["use_reddit"]
+    off["use_reddit"] = False  # public .rss needs no key, so the default is on
     names = {r["company"]["company"] for r in sh.discover(sh.with_defaults(off))}
     assert not any(n.startswith("Reddit ") for n in names)
     assert any(n.startswith("Reddit ") for n in {r["company"]["company"]
                                                  for r in sh.discover(cfg)})
+
+
+def test_bluesky_and_arbeitnow_leads(cfg):
+    names = {r["company"]["company"] for r in sh.discover(cfg)}
+    assert "Bluesky - @salonowner.bsky.social" in names
+    assert "Klarheit GmbH" in names          # Arbeitnow remote job
+    assert "Berlin Shop" not in names        # onsite job not fetched
+    assert not any("dev.bsky" in n for n in names)  # offering services, skipped
+    assert sh.is_person("Bluesky - @x")
 
 
 def test_env_file_loader(tmp_path, monkeypatch):
