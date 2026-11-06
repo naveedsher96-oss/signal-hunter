@@ -394,6 +394,12 @@ def with_defaults(cfg):
     cfg.setdefault("ntfy_topic", "")        # phone alerts for new HOT leads (ntfy.sh)
     cfg.setdefault("news_queries", DEFAULT_NEWS_QUERIES)
     cfg.setdefault("site_tech", True)       # check discovered sites for GHL/CRM tools
+    cfg.setdefault("decision_titles", DEFAULT_DECISION_TITLES)  # who to email, best first
+    cfg.setdefault("hunter_api_key", "")    # Hunter.io free plan: 50 credits a month
+    cfg.setdefault("hunter_monthly_credits", 45)  # stop before the free 50 run out
+    cfg.setdefault("hunter_per_run", 5)     # at most this many Hunter credits per scan
+    cfg.setdefault("optout_line", "P.S. Not relevant? Just reply \"no thanks\" and I "
+                                  "won't email you again.")  # cold-email rules (CAN-SPAM, GDPR)
     return cfg
 
 
@@ -1545,16 +1551,222 @@ def guess_site(c):
     return "", None
 
 
-def find_contacts(c):
-    """Free contact-finding: the company's homepage, then its contact/about/team
-    pages. Returns (ranked emails, guessed contact name, site domain)."""
+DEFAULT_DECISION_TITLES = [
+    "founder", "owner", "ceo", "chief executive", "president", "managing director",
+    "managing partner", "principal", "coo", "chief operating", "general manager",
+    "head of sales", "vp of sales", "vp sales", "sales director", "head of growth",
+    "head of operations", "operations manager", "director of operations",
+    "practice manager", "office manager", "marketing director", "head of marketing",
+    "partner", "director"]
+NAME_STOP = {"our", "the", "team", "meet", "about", "contact", "us", "and", "of", "for",
+             "with", "your", "get", "in", "touch", "read", "more", "view", "home",
+             "services", "privacy", "policy", "terms", "book", "call", "now", "free",
+             "new", "all", "rights", "reserved", "learn", "client", "clients", "leadership",
+             "staff", "people", "company", "inc", "llc", "ltd", "group", "agency",
+             "dental", "realty", "studio", "media", "marketing", "sales", "manager",
+             "director", "founder", "owner", "president", "partner", "chief", "officer",
+             "head", "operations", "executive", "ceo", "coo", "cto", "cfo", "vp",
+             "senior", "principal", "general", "office", "practice", "customer",
+             "success", "support", "account", "hello", "welcome", "careers", "jobs"}
+NAME_WORD = r"[A-Z][a-z]+(?:[-'][A-Z]?[a-z]+)?"
+NAME_RE = re.compile(rf"^({NAME_WORD})(?:\s+[A-Z]\.)?\s+({NAME_WORD})(?:\s+({NAME_WORD}))?$")
+SPLIT_RE = re.compile(r"\s*(?:,|\||-|–|—|:|\bis\b(?:\s+(?:our|the))?)\s*")
+# how a company's addresses are built: {f} first, {l} last, {fi}/{li} initials
+EMAIL_PATTERNS = {"first.last": "{f}.{l}", "first": "{f}", "firstlast": "{f}{l}",
+                  "flast": "{fi}{l}", "f.last": "{fi}.{l}", "first_last": "{f}_{l}",
+                  "firstl": "{f}{li}", "last": "{l}", "first-last": "{f}-{l}"}
+
+
+def title_rank(text, titles):
+    """Position of the best decision-maker title in `text` (lower is better), or None."""
+    t = (text or "").lower()
+    for i, k in enumerate(titles):
+        if re.search(rf"(?<![a-z]){re.escape(k.lower())}(?![a-z])", t):
+            return i
+    return None
+
+
+def as_name(text, company=""):
+    """'Jane Doe' when `text` looks like a person's name, else ''."""
+    text = re.sub(r"\s+", " ", (text or "").strip(" .,"))
+    m = NAME_RE.match(text)
+    if not m:
+        return ""
+    words = [w for w in m.groups() if w]
+    skip = NAME_STOP | set(norm(company).split())
+    if any(w.lower() in skip for w in words):
+        return ""
+    return text
+
+
+def page_lines(page):
+    """Visible text of a page, one line per block element."""
+    page = re.sub(r"(?is)<(script|style|noscript)[^>]*>.*?</\1>", " ", page or "")
+    page = re.sub(r"(?i)<br\s*/?>|</(p|div|h[1-6]|li|td|th|span|strong|b|em|a|figcaption|"
+                  r"section|article|header|footer|dt|dd)>", "\n", page)
+    out = []
+    for ln in strip_html_lines(page):
+        if 2 <= len(ln) <= 120:
+            out.append(ln)
+    return out
+
+
+def strip_html_lines(s):
+    s = html.unescape(re.sub(r"<[^>]+>", " ", s))
+    return [re.sub(r"[ \t\r\f\v]+", " ", ln).strip() for ln in s.split("\n")]
+
+
+def jsonld_people(page):
+    out = []
+    for blob in re.findall(r'(?is)<script[^>]+application/ld\+json[^>]*>(.*?)</script>',
+                           page or ""):
+        try:
+            data = json.loads(blob)
+        except ValueError:
+            continue
+        stack = [data]
+        while stack:
+            d = stack.pop()
+            if isinstance(d, list):
+                stack.extend(d)
+            elif isinstance(d, dict):
+                if d.get("@type") == "Person" and isinstance(d.get("name"), str):
+                    out.append((d["name"], str(d.get("jobTitle") or "")))
+                stack.extend(v for v in d.values() if isinstance(v, (dict, list)))
+    return out
+
+
+def people_on_page(page, titles, company=""):
+    """Named people with a decision-maker title on one page:
+    [{"name", "title", "rank"}], best title first."""
+    found = {}
+
+    def add(name, title):
+        name, rank = as_name(name, company), title_rank(title, titles)
+        if name and rank is not None and len(title) <= 80:
+            if name not in found or rank < found[name]["rank"]:
+                found[name] = {"name": name, "title": title.strip(" .,"), "rank": rank}
+
+    for name, title in jsonld_people(page):
+        add(name, title)
+    lines = page_lines(page)
+    for i, ln in enumerate(lines):
+        parts = [p for p in SPLIT_RE.split(ln, maxsplit=1) if p]
+        if len(parts) == 2:              # "Jane Doe, Founder" / "Founder - Jane Doe"
+            add(parts[0], parts[1])
+            add(parts[1], parts[0])
+        if as_name(ln, company):         # name on one line, title next to it
+            nxt = lines[i + 1] if i + 1 < len(lines) else ""
+            if title_rank(nxt, titles) is not None and not as_name(nxt, company):
+                add(ln, nxt)
+            elif i >= 1 and not (i >= 2 and as_name(lines[i - 2], company)):
+                add(ln, lines[i - 1])    # title above the name, not another person's
+    return sorted(found.values(), key=lambda p: (p["rank"], p["name"]))
+
+
+def name_parts(full):
+    import unicodedata
+    s = unicodedata.normalize("NFKD", full or "").encode("ascii", "ignore").decode()
+    words = [re.sub(r"[^a-z]", "", w) for w in s.lower().split()]
+    words = [w for w in words if w]
+    return (words[0], words[-1]) if len(words) >= 2 else ("", "")
+
+
+def email_for(full, pattern, domain):
+    f, l = name_parts(full)
+    tpl = EMAIL_PATTERNS.get(pattern)
+    if not (f and l and tpl and domain):
+        return ""
+    return tpl.format(f=f, l=l, fi=f[0], li=l[0]) + "@" + domain
+
+
+def learn_pattern(emails, people, domain):
+    """Work out how this company builds addresses from real ones on its site."""
+    locals_ = [e.split("@")[0] for e in emails if e.endswith("@" + domain)]
+    for local in locals_:
+        for p in people:
+            for pat in EMAIL_PATTERNS:
+                if email_for(p["name"], pat, domain).split("@")[0] == local:
+                    return pat
+    for local in locals_:
+        if local in GENERIC_LOCAL:
+            continue
+        if re.fullmatch(r"[a-z]{2,}\.[a-z]{2,}", local):
+            return "first.last"
+        if re.fullmatch(r"[a-z]{2,}_[a-z]{2,}", local):
+            return "first_last"
+    return ""
+
+
+def mail_domain_ok(domain, cache=None):
+    """Does the domain accept email (has an MX record)? True/False, or None when the
+    free DNS lookup can't tell."""
+    cache = {} if cache is None else cache
+    if domain in cache:
+        return cache[domain]
+    j = http_get("https://dns.google/resolve?" +
+                 urllib.parse.urlencode({"name": domain, "type": "MX"}))
+    ok = None
+    if isinstance(j, dict):
+        if j.get("Status") == 3:
+            ok = False
+        elif j.get("Status") == 0:
+            ok = any(a.get("type") == 15 for a in j.get("Answer") or [])
+    cache[domain] = ok
+    return ok
+
+# -------------------------------------------------- Hunter.io (free plan API) --
+
+HUNTER_API = "https://api.hunter.io/v2/"
+
+
+def hunter_key(cfg):
+    return (os.environ.get("HUNTER_API_KEY") or cfg.get("hunter_api_key") or "").strip()
+
+
+def hunter_lookup(key, domain, person, titles):
+    """One Hunter.io request (1 credit at most). With a name: Email Finder for that
+    person. Without: Domain Search for the most senior people at the domain.
+    Returns {"email","name","title","status","score"} or {}."""
+    hdr = {"X-API-KEY": key}
+    if person:
+        f, l = (person["name"].split()[0], person["name"].split()[-1])
+        j = http_get(HUNTER_API + "email-finder?" + urllib.parse.urlencode(
+            {"domain": domain, "first_name": f, "last_name": l}), headers=hdr)
+        d = (j or {}).get("data") or {}
+        if not d.get("email"):
+            return {}
+        return {"email": d["email"].lower(), "name": person["name"],
+                "title": d.get("position") or person.get("title", ""),
+                "status": (d.get("verification") or {}).get("status") or "",
+                "score": d.get("score") or 0}
+    j = http_get(HUNTER_API + "domain-search?" + urllib.parse.urlencode(
+        {"domain": domain, "type": "personal", "limit": 10}), headers=hdr)
+    best = None
+    for e in ((j or {}).get("data") or {}).get("emails") or []:
+        if not e.get("value"):
+            continue
+        rank = title_rank(e.get("position") or "", titles)
+        senior = {"executive": 0, "senior": 1}.get(e.get("seniority") or "", 2)
+        key_ = (rank if rank is not None else 99, senior, -(e.get("confidence") or 0))
+        if best is None or key_ < best[0]:
+            name = " ".join(x for x in (e.get("first_name"), e.get("last_name")) if x)
+            best = (key_, {"email": e["value"].lower(), "name": name,
+                           "title": e.get("position") or "",
+                           "status": (e.get("verification") or {}).get("status") or "",
+                           "score": e.get("confidence") or 0})
+    return best[1] if best else {}
+
+
+def site_pages(c):
+    """(domain, pages): the company's homepage plus up to 4 contact/about/team pages."""
     dom, home = domain_of(c.get("website", "")), None
     if dom:
         home = http_get(f"https://{dom}", as_json=False)
     if not home and not is_person(c.get("company", "")):
         dom, home = guess_site(c)
     if not home:
-        return [], "", ""
+        return "", []
     pages, seen, i = [home], set(), 0
     while i < len(pages) and len(pages) < 5:
         for href in re.findall(r"href=[\"']([^\"']+)[\"']", pages[i]):
@@ -1570,11 +1782,29 @@ def find_contacts(c):
             if sub:
                 pages.append(sub)
         i += 1
+    return dom, pages
+
+
+def find_contacts(c, info=None, titles=None):
+    """Free contact-finding from the company's own site. Returns (ranked emails,
+    contact name, site domain). `info`, when given, also gets "people" (named
+    decision makers with titles found on the pages)."""
+    dom, pages = site_pages(c)
+    if not pages:
+        return [], "", ""
     emails = []
     for p in pages:
         for e in contact_emails(p, dom):
             if e not in emails:
                 emails.append(e)
+    people = []
+    for p in pages:
+        for person in people_on_page(p, titles or DEFAULT_DECISION_TITLES, c["company"]):
+            if all(person["name"] != q["name"] for q in people):
+                people.append(person)
+    people.sort(key=lambda p: p["rank"])
+    if info is not None:
+        info["people"] = people
     name = ""
     if emails:
         m = re.match(r"^([a-z]{3,})[._-]([a-z]{3,})$", emails[0].split("@")[0])
@@ -1583,16 +1813,60 @@ def find_contacts(c):
     return emails[:3], name, dom
 
 
+def pick_contact(c, emails, people, dom, mx_ok):
+    """Best contact from what the site showed: (email, name, title, source, note).
+    source: "site" (address published on the site), "guessed" (built from the
+    company's address pattern), or "" when nothing usable. People are in title
+    order, so the owner beats the office manager."""
+    def published(p):
+        for pat in EMAIL_PATTERNS:
+            e = email_for(p["name"], pat, dom)
+            if e and e in emails:
+                return e
+        return ""
+    top = people[0] if people else None
+    if top and published(top):
+        return published(top), top["name"], top["title"], "site", "Published on their website"
+    pat = learn_pattern(emails, people, dom)
+    if top and pat and mx_ok is not False:   # a pattern seen in their real addresses
+        return (email_for(top["name"], pat, dom), top["name"], top["title"], "guessed",
+                f"Built from the {pat} pattern their other addresses use")
+    for p in people[1:]:
+        if published(p):
+            return published(p), p["name"], p["title"], "site", "Published on their website"
+    personal = [e for e in emails if e.split("@")[0] not in GENERIC_LOCAL
+                and e.endswith("@" + dom)]
+    if personal:
+        return personal[0], "", "", "site", "Published on their website"
+    if top and mx_ok is not False:
+        return (email_for(top["name"], "first", dom), top["name"], top["title"], "guessed",
+                "Pattern unknown: first name guessed")
+    if emails:
+        return emails[0], "", "", "site", "General inbox from their website"
+    return "", (top or {}).get("name", ""), (top or {}).get("title", ""), "", ""
+
+
 def enrich_contacts(results, cfg, on_progress=None, should_stop=lambda: False,
                     include_cold=False, limit=None):
-    """Fill contact_email / contact_name on the top company leads, free, from their
-    own websites. When a site is newly guessed, also check it for CRM/GHL tech and
-    re-score the lead with those signals. Person leads keep 'reply on the post'."""
+    """Fill contact_email / contact_name / contact_title on the top company leads.
+    Free first: the company's own site (published emails, named owners and
+    managers, the address pattern) and a DNS check that the domain takes mail.
+    Then, for HOT leads still without a confirmed address, Hunter.io's free API
+    when a key is set, within cfg["_hunter_left"] credits (cached per domain in
+    cfg["_hunter_cache"]; credits spent are added to cfg["_hunter_used"]).
+    When a site is newly guessed, also check it for CRM/GHL tech and re-score.
+    Person leads keep 'reply on the post'."""
     if not cfg.get("find_contacts", True):
         return
     limit = int(cfg.get("contact_limit", 20) if limit is None else limit)
+    titles = cfg.get("decision_titles") or DEFAULT_DECISION_TITLES
     cats = compile_categories(cfg) if cfg.get("site_tech", True) else {}
     lb = cfg.get("lookback_days", 45)
+    key = hunter_key(cfg)
+    cache = cfg.setdefault("_hunter_cache", {})
+    cfg.setdefault("_hunter_used", 0)
+    left = cfg.get("_hunter_left", int(cfg.get("hunter_per_run", 5)))
+    mx = {}
     ranked = sorted(results, key=lambda r: r.get("score", 0), reverse=True)
     tried = 0
     for r in ranked:
@@ -1607,13 +1881,42 @@ def enrich_contacts(results, cfg, on_progress=None, should_stop=lambda: False,
         if on_progress:
             on_progress(tried, limit, f"Finding contacts: {c['company']}", None)
         guessed_site = not c.get("website")
-        emails, name, dom = find_contacts(c)
+        info = {}
+        emails, name, dom = find_contacts(c, info, titles)
+        people = info.get("people") or []
         if dom and not c.get("website"):
             c["website"] = f"https://{dom}"
-        if emails:
-            c["contact_email"] = emails[0]
-            if name and not c.get("contact_name"):
-                c["contact_name"] = name
+        mx_ok = mail_domain_ok(dom, mx) if dom else None
+        email, pname, ptitle, src, note = pick_contact(c, emails, people, dom, mx_ok) \
+            if dom else ("", "", "", "", "")
+        m = re.match(r"^([a-z]{3,})[._-]([a-z]{3,})$", email.split("@")[0])
+        if not pname and m and m.group(1) not in GENERIC_LOCAL:
+            pname = f"{m.group(1).title()} {m.group(2).title()}"  # sarah.lee@ -> Sarah Lee
+        # Hunter.io: only for HOT leads that have no address published for a named
+        # person yet, at most one credit per domain (results cached)
+        weak = src != "site" or not pname
+        if key and dom and weak and r.get("tier") == "HOT" and mx_ok is not False:
+            hit = cache.get(dom)
+            if hit is None and left > 0:
+                left -= 1
+                cfg["_hunter_used"] += 1
+                hit = hunter_lookup(key, dom, people[0] if people else None, titles)
+                hit["date"] = datetime.now().strftime("%Y-%m-%d")
+                cache[dom] = hit
+            if hit and hit.get("email") and hit.get("status") != "invalid":
+                email, src = hit["email"], "hunter"
+                pname, ptitle = hit.get("name") or pname, hit.get("title") or ptitle
+                note = "Hunter.io: " + (hit.get("status") or "found") + (
+                    f", {hit['score']}% confidence" if hit.get("score") else "")
+        if email:
+            c["contact_email"] = email
+            c["contact_source"], c["contact_note"] = src, note
+            if pname and not c.get("contact_name"):
+                c["contact_name"] = pname
+            if ptitle and not c.get("contact_title"):
+                c["contact_title"] = ptitle
+        elif pname and not c.get("contact_name"):
+            c["contact_name"], c["contact_title"] = pname, ptitle
         # a freshly found site is worth a tech check: "runs GoHighLevel" is a
         # signal in itself and makes the email stronger
         if dom and guessed_site and cats:
@@ -1628,6 +1931,7 @@ def enrich_contacts(results, cfg, on_progress=None, should_stop=lambda: False,
                 r["sources"] = ", ".join(sorted({e["source"]
                                                  for e in r["signals"]}))
         time.sleep(max(0.5, cfg.get("delay_seconds", 1)))
+    cfg["_hunter_left"] = left
     # enrichment can raise scores - keep the output ordered
     results.sort(key=lambda r: (r.get("score", 0), r.get("newest", "")),
                  reverse=True)
@@ -1727,6 +2031,8 @@ def build_email(cfg, company, result):
     sig = (f"\n\nBest regards,\n{cfg['your_name']}\n{cfg['headline']}\n{cfg['email']}"
            + (f"\n{cfg['linkedin']}" if cfg.get("linkedin") else "")
            + (f"\n{cfg['portfolio']}" if cfg.get("portfolio") else ""))
+    if not person and cfg.get("optout_line"):
+        sig += "\n\n" + cfg["optout_line"]   # cold email: an easy way to say no
     need = result["needs"][0] if result["needs"] else "CRM Automation"
     phrase = NEED_PHRASE.get(need, need.lower())
     top = result["signals"][0] if result["signals"] else None
@@ -1858,6 +2164,8 @@ def build_followup(cfg, company, result):
             f"suggestions, no strings. And if the timing's off, no worries - tell "
             f"me and I'll check back in a few weeks.\n\n"
             f"{cfg['your_name']}\n{cfg['email']}")
+    if not person and cfg.get("optout_line"):
+        body += "\n\n" + cfg["optout_line"]
     return subject, body
 
 # ------------------------------------------------------------------ output --
@@ -1886,8 +2194,22 @@ def link(cell, url):
 LEAD_COLS = ["Company / lead", "Tier", "Score", "Track", "Needs", "Lead type",
              "Intent signals",
              "Newest signal", "Remote evidence", "Top signal", "Top signal link",
-             "New this run?", "Sources", "Contact name", "Contact email", "Phone",
+             "New this run?", "Sources", "Contact name", "Contact title", "Contact email",
+             "Email confidence", "Phone",
              "Find hiring manager", "Status", "Sent date", "Follow-up date", "Notes"]
+
+
+CONFIDENCE = {"site": "Found on their site", "hunter": "Hunter.io",
+              "guessed": "Guessed - check first"}
+
+
+def contact_confidence(c):
+    """How sure we are of the email, for the Excel and the page."""
+    if not c.get("contact_email"):
+        return ""
+    label = CONFIDENCE.get(c.get("contact_source", ""), "From your list")
+    note = c.get("contact_note", "")
+    return f"{label} ({note})" if note and c.get("contact_source") != "site" else label
 
 
 STATUS_LABELS = {"contacted": "Contacted", "replied": "Replied", "call": "Call booked",
@@ -1966,7 +2288,8 @@ def write_outputs(cfg, results, label="List", seen=None, out_dir=None, emails=Tr
                       r["remote_evidence"],
                       f"{top['label']}: {top['detail']}" if top else "No signals found",
                       top["url"] if top else "", "NEW" if any_new else "", r["sources"],
-                      c.get("contact_name", ""), c.get("contact_email", ""), c.get("phone", ""),
+                      c.get("contact_name", ""), c.get("contact_title", ""),
+                      c.get("contact_email", ""), contact_confidence(c), c.get("phone", ""),
                       "Reply on the post" if person else "Search LinkedIn",
                       status_txt, sent_val, "", ""])
         row = leads.max_row
@@ -1999,8 +2322,8 @@ def write_outputs(cfg, results, label="List", seen=None, out_dir=None, emails=Tr
                 f.write(f"To: {c.get('contact_email') or '[add email]'}\n"
                         f"Subject: {subject}\n\n{body}\n")
 
-    style_sheet(leads, [30, 8, 7, 24, 30, 22, 9, 12, 26, 60, 14, 9, 22, 18, 26, 16, 18, 12,
-                        12, 13, 30])
+    style_sheet(leads, [30, 8, 7, 24, 30, 22, 9, 12, 26, 60, 14, 9, 22, 18, 20, 26, 30, 16,
+                        18, 12, 12, 13, 30])
     style_sheet(sig_ws, [30, 28, 24, 22, 8, 80, 12, 14, 7])
     style_sheet(em_ws, [30, 8, 26, 50, 100])
     for row in leads.iter_rows(min_row=2):

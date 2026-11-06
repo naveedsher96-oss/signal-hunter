@@ -27,7 +27,7 @@ import threading
 import time
 import traceback
 import uuid
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from flask import (Flask, Response, jsonify, redirect, request, send_file, session,
                    url_for)
@@ -44,8 +44,10 @@ EDITABLE = {"your_name", "headline", "email", "linkedin", "portfolio", "years", 
             "subreddits", "pain_signals", "smallbiz_words", "exclude_words",
             "freelancer_queries", "use_reddit", "min_budget_usd", "max_bids",
             "max_ask_age_days", "ntfy_topic", "news_queries", "use_bluesky",
-            "bsky_queries"}
-NUMBERS = {"min_budget_usd": 100000, "max_bids": 1000, "max_ask_age_days": 180}
+            "bsky_queries", "decision_titles", "hunter_api_key",
+            "hunter_monthly_credits", "hunter_per_run", "optout_line"}
+NUMBERS = {"min_budget_usd": 100000, "max_bids": 1000, "max_ask_age_days": 180,
+           "hunter_monthly_credits": 50, "hunter_per_run": 50}
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY") or secrets.token_hex(32)
@@ -74,6 +76,42 @@ def get_cfg():
     return sh.with_defaults(cfg)
 
 
+def hunter_usage():
+    """Hunter.io credits this app has spent this calendar month."""
+    u = db.get_setting("hunter_usage") or {}
+    month = datetime.now().strftime("%Y-%m")
+    return u.get("used", 0) if u.get("month") == month else 0
+
+
+def hunter_prepare(cfg):
+    """Give the engine this scan's Hunter budget and the per-domain cache."""
+    left = max(0, int(cfg.get("hunter_monthly_credits", 45)) - hunter_usage())
+    cfg["_hunter_left"] = min(left, int(cfg.get("hunter_per_run", 5)))
+    cfg["_hunter_cache"] = db.get_setting("hunter_cache") or {}
+    cfg["_hunter_used"] = 0
+
+
+def hunter_save(cfg):
+    """Store credits spent and the cache (lookups older than 60 days are retried)."""
+    if cfg.get("_hunter_used"):
+        db.set_setting("hunter_usage", {"month": datetime.now().strftime("%Y-%m"),
+                                        "used": hunter_usage() + cfg["_hunter_used"]})
+    cutoff = (datetime.now() - timedelta(days=60)).strftime("%Y-%m-%d")
+    cache = {d: v for d, v in (cfg.get("_hunter_cache") or {}).items()
+             if (v.get("date") or "") >= cutoff}
+    keep = sorted(cache.items(), key=lambda kv: kv[1].get("date", ""))[-1000:]
+    db.set_setting("hunter_cache", dict(keep))
+
+
+def public_cfg(cfg):
+    """Settings for the page: the Hunter key is never sent back, only whether it's set."""
+    out = {k: v for k, v in cfg.items() if not k.startswith("_")}
+    out["hunter_key_set"] = bool(sh.hunter_key(cfg))
+    out["hunter_api_key"] = ""
+    out["hunter_used"] = hunter_usage()
+    return out
+
+
 def summarise(r):
     c = r["company"]
     top = r["signals"][0] if r["signals"] else None
@@ -84,6 +122,9 @@ def summarise(r):
             "new": r.get("any_new", False), "first_seen": r.get("first_seen", ""),
             "to": c.get("contact_email", ""), "website": c.get("website", ""),
             "phone": c.get("phone", ""), "contact": c.get("contact_name", ""),
+            "contact_title": c.get("contact_title", ""),
+            "contact_source": c.get("contact_source", ""),
+            "contact_note": c.get("contact_note", ""),
             "person": sh.is_person(c["company"]),
             "url": top["url"] if top else "", "email": r.get("email"),
             "followup": r.get("followup"),
@@ -167,6 +208,7 @@ def run_one(mode, companies, label):
 
         stop = lambda: JOB["stop"]
         stats = {}
+        hunter_prepare(cfg)
         if mode == "discover":
             results = sh.discover(cfg, on_progress=progress, should_stop=stop,
                                   stats=stats)
@@ -184,6 +226,10 @@ def run_one(mode, companies, label):
                 xlsx = f.read()
             name = os.path.basename(path)
         db.add_seen({k: v for k, v in seen.items() if k not in before})
+        try:
+            hunter_save(cfg)
+        except Exception:
+            traceback.print_exc()
         rows = [summarise(r) for r in results]
         tiers = {t: sum(r["tier"] == t for r in rows) for t in ("HOT", "WARM", "COLD")}
         summary = {"label": label, "count": len(rows), "new": new, **tiers,
@@ -325,13 +371,26 @@ def config():
                     v = max(0, min(NUMBERS[k], int(float(v or 0))))
                 except (TypeError, ValueError):
                     return jsonify(error=f"{k} must be a number."), 400
+            if k == "hunter_api_key":
+                if v is not None:     # null removes the key
+                    v = str(v).strip()
+                    if not v:
+                        continue      # empty field = keep the saved key
+                else:
+                    v = ""
+                if v and not re.fullmatch(r"[A-Za-z0-9]{20,64}", v):
+                    return jsonify(error="That doesn't look like a Hunter API key."), 400
+            if k == "decision_titles":
+                v = [str(t).strip().lower() for t in (v or []) if str(t).strip()][:60]
+                if not v:
+                    continue
             if k == "ntfy_topic":
                 v = (v or "").strip()
                 if v and not re.fullmatch(r"[A-Za-z0-9_-]{8,64}", v):
                     return jsonify(error="Alert topic: 8-64 letters, digits, - or _."), 400
             cfg[k] = v
         db.set_setting("config", cfg)
-    return jsonify(cfg)
+    return jsonify(public_cfg(cfg))
 
 
 @app.route("/upload", methods=["POST"])

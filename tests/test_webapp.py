@@ -169,3 +169,34 @@ def test_test_alert_endpoint(client, posts):
     assert client.post("/test-alert", json={"topic": "x"}).status_code == 400
     assert client.post("/test-alert", json={"topic": "sh-test-topic"}).status_code == 200
     assert posts[0][1]["topic"] == "sh-test-topic"
+
+
+def test_hunter_key_is_hidden_kept_and_removable(client):
+    login(client)
+    key = "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0"
+    r = client.post("/config", json={"hunter_api_key": key, "hunter_per_run": 99})
+    assert r.status_code == 200
+    d = r.get_json()
+    assert d["hunter_api_key"] == "" and d["hunter_key_set"] and d["hunter_per_run"] == 50
+    assert webapp.get_cfg()["hunter_api_key"] == key
+    client.post("/config", json={"hunter_api_key": ""})        # blank field keeps it
+    assert webapp.get_cfg()["hunter_api_key"] == key
+    assert client.post("/config", json={"hunter_api_key": "bad key!"}).status_code == 400
+    assert not client.post("/config", json={"hunter_api_key": None}).get_json()["hunter_key_set"]
+    assert client.get("/config").get_json()["hunter_api_key"] == ""
+
+
+def test_hunter_budget_and_cache_persist(monkeypatch):
+    webapp.db.set_setting("hunter_usage", {"month": "2000-01", "used": 40})  # old month
+    cfg = {"hunter_monthly_credits": 45, "hunter_per_run": 5}
+    webapp.hunter_prepare(cfg)
+    assert cfg["_hunter_left"] == 5 and cfg["_hunter_cache"] == {}
+    cfg["_hunter_used"] = 3
+    cfg["_hunter_cache"] = {"a.com": {"email": "x@a.com", "date": "2999-01-01"},
+                            "old.com": {"date": "2000-01-01"}}
+    webapp.hunter_save(cfg)
+    assert webapp.hunter_usage() == 3
+    assert set(webapp.db.get_setting("hunter_cache")) == {"a.com"}
+    cfg2 = {"hunter_monthly_credits": 4, "hunter_per_run": 5}
+    webapp.hunter_prepare(cfg2)
+    assert cfg2["_hunter_left"] == 1
