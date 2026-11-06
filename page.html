@@ -319,7 +319,9 @@ async function loadRun(id){
  $("fNeed").innerHTML='<option value="">All needs</option>'+needs.map(n=>'<option>'+esc(n)+'</option>').join("");
  render();}
 
-function gmail(r){const e=r.email;return "https://mail.google.com/mail/?view=cm&fs=1&to="+enc(r.to||"")+"&su="+enc(e.subject)+"&body="+enc(e.body);}
+function toField(r){if(!r.to)return "";const n=(r.contact||"").replace(/["<>,;\\]/g,"").trim();return n?'"'+n+'" <'+r.to+'>':r.to;}
+function markSent(i){const st=stOf(window._rows[i]);if(!st||!st.status)setStatus(i,"contacted");}
+function gmail(r,e){e=e||r.email;return "https://mail.google.com/mail/?view=cm&fs=1&to="+enc(toField(r))+"&su="+enc(e.subject)+"&body="+enc(e.body);}
 function mailto(e,to){return "mailto:"+(to||"")+"?subject="+enc(e.subject)+"&body="+enc(e.body);}
 const ST_OPTS=[["","New"],["contacted","Contacted"],["replied","Replied"],["call","Call booked"],
  ["proposal","Proposal sent"],["won","Won"],["dead","Dead"],["junk","Junk"]];
@@ -387,12 +389,14 @@ function render(){
      (st.name&&st.name.toLowerCase()!==stKey(r)?" (as "+esc(st.name)+")":"")+".</div>":"")+
    (r.email?"<details><summary>View "+(r.person?"reply draft":"email draft")+"</summary><pre id='e"+i+"'><b>Subject:</b> "+esc(r.email.subject)+"\n\n"+esc(r.email.body)+"</pre>"+
     "<div class='acts'><button class='ghost' onclick='copyText(\"e"+i+"\",this)'>Copy</button>"+
-    (r.person?(r.url?"<a class='ghost' href='"+esc(r.url)+"' target='_blank' rel='noopener'>Open post to reply</a>":""):
-     "<a class='ghost' href='"+esc(mailto(r.email,r.to))+"'>Open in Mail app</a>"+
-     "<a class='ghost' href='"+esc(gmail(r))+"' target='_blank' rel='noopener'>Open in Gmail</a>")+"</div></details>":"")+
+    (r.person?(r.url?"<a class='ghost' href='"+esc(r.url)+"' target='_blank' rel='noopener' onclick='markSent("+i+")'>Open post to reply</a>":""):
+     "<a class='ghost' href='"+esc(mailto(r.email,r.to))+"' onclick='markSent("+i+")'>Open in Mail app</a>"+
+     "<a class='ghost' href='"+esc(gmail(r))+"' target='_blank' rel='noopener' onclick='markSent("+i+")'>Open in Gmail</a>"+
+     (stOf(r)&&stOf(r).status?"":"<div class='muted' style='width:100%'>Opening it marks this lead Contacted. Change the status if you don't send it.</div>"))+"</div></details>":"")+
    (r.followup?"<details><summary>Follow-up draft (send if no reply in ~4 days)</summary><pre id='f"+i+"'><b>Subject:</b> "+esc(r.followup.subject)+"\n\n"+esc(r.followup.body)+"</pre>"+
     "<div class='acts'><button class='ghost' onclick='copyText(\"f"+i+"\",this)'>Copy</button>"+
-    "<a class='ghost' href='"+esc(mailto(r.followup,r.to))+"'>Open in Mail app</a></div></details>":"")+
+    "<a class='ghost' href='"+esc(mailto(r.followup,r.to))+"'>Open in Mail app</a>"+
+    "<a class='ghost' href='"+esc(gmail(r,r.followup))+"' target='_blank' rel='noopener'>Open in Gmail</a></div></details>":"")+
    "</td></tr>"}).join("")+"</tbody>";}
 const CONF={site:["ok","Found on their site"],hunter:["ok","Hunter.io"],guessed:["warn","Guessed: check before sending"]};
 function contactLine(r){if(r.person||!(r.contact||r.to||r.phone))return "";
