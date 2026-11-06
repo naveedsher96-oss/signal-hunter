@@ -33,7 +33,7 @@ cursor:pointer;text-align:left;color:var(--ink);font-weight:400}
 cursor:pointer;background:var(--soft)}
 #drop.over{border-color:var(--brand2)}#drop b{color:var(--brand2)}
 .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px}
-input[type=text],select,textarea{font:inherit;padding:8px 10px;border:1px solid var(--line);
+input[type=text],input[type=password],input[type=number],select,textarea{font:inherit;padding:8px 10px;border:1px solid var(--line);
 border-radius:8px;background:var(--card);color:var(--ink);min-width:0;max-width:100%}
 textarea{width:100%;min-height:54px}
 button{font:inherit;font-weight:600;border:0;border-radius:8px;padding:9px 16px;cursor:pointer;
@@ -55,6 +55,7 @@ display:inline-block}
 .SMALL{background:var(--smallbg);color:var(--small)}
 .need{display:inline-block;font-size:12px;background:var(--chip);border-radius:6px;
 padding:1px 7px;margin:0 4px 4px 0}
+.conf{font-size:11px;font-weight:700;padding:1px 6px;border-radius:6px;white-space:nowrap}.conf.ok{background:var(--newbg);color:var(--new)}.conf.warn{background:var(--warmbg);color:var(--warm)}
 .bar{height:10px;background:var(--line);border-radius:99px;overflow:hidden}
 .bar>div{height:100%;background:var(--brand2);width:0;transition:width .3s}
 .stats{display:flex;gap:10px;flex-wrap:wrap;margin:12px 0}
@@ -210,6 +211,17 @@ For Freelancer.com leads, bid on the project using the draft. For Reddit or Hack
  <div class="row" style="gap:8px;align-items:flex-end"><label class="f" style="flex:1">Alert topic name<input type="text" id="p_ntfy_topic" placeholder="e.g. sh-naveed-7f3k9q2m"></label>
   <button class="ghost" type="button" onclick="$('p_ntfy_topic').value='sh-'+crypto.getRandomValues(new Uint32Array(2)).join('').slice(0,12)">Make one for me</button>
   <button class="ghost" type="button" onclick="testAlert(this)">Send test alert</button></div>
+ <h3 style="margin:18px 0 4px;font-size:15px">Decision makers and emails</h3>
+ <p class="muted" style="margin:0 0 8px">The app reads each company's own team and contact pages for the owner or manager, works out how their emails are built, and checks the domain takes mail. All free.
+  For HOT leads it can't confirm, it can also ask <b>Hunter.io</b>: make a free account at hunter.io (no card), open API keys, and paste the key here. Each lookup uses 1 of your 50 free monthly credits, and a company is only looked up once.</p>
+ <label class="f">Job titles to look for, best first (comma-separated)<textarea id="p_titles"></textarea></label>
+ <div class="row" style="gap:8px;align-items:flex-end;margin-top:8px"><label class="f" style="flex:1">Hunter.io API key<input type="password" id="p_hunter_api_key" autocomplete="off" placeholder="Paste your key"></label>
+  <button class="ghost" type="button" id="hunterRm" onclick="removeHunter()">Remove key</button></div>
+ <p class="muted" id="hunterState" style="margin:4px 0 10px"></p>
+ <div class="grid">
+  <label class="f">Hunter credits the app may use per month<input type="number" min="0" max="50" id="p_hunter_monthly_credits"></label>
+  <label class="f">Hunter credits per scan at most<input type="number" min="0" max="50" id="p_hunter_per_run"></label></div>
+ <label class="f">Last line of cold emails (an easy way to say no, which cold-email laws expect)<input type="text" id="p_optout_line"></label>
  <p class="err" id="profErr"></p>
  <div class="row" style="justify-content:flex-end"><button class="ghost" onclick="profile.close()">Cancel</button>
   <button onclick="saveProfile()">Save</button></div>
@@ -220,7 +232,7 @@ const $=id=>document.getElementById(id);
 const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const enc=encodeURIComponent;
 let FILE=null,timer=null,ROWS=[],LSTATUS={};
-const NUMS=["min_budget_usd","max_bids","max_ask_age_days"];
+const NUMS=["min_budget_usd","max_bids","max_ask_age_days","hunter_monthly_credits","hunter_per_run"];
 const FIELDS=[["company","Company (required)"],["website","Website"],["contact_name","Contact name"],
  ["contact_email","Contact email"],["phone","Phone"],["ats_slug","Job board slug"]];
 if("{{LOGOUT}}")$("logout").classList.remove("hidden");
@@ -382,9 +394,11 @@ function render(){
     "<div class='acts'><button class='ghost' onclick='copyText(\"f"+i+"\",this)'>Copy</button>"+
     "<a class='ghost' href='"+esc(mailto(r.followup,r.to))+"'>Open in Mail app</a></div></details>":"")+
    "</td></tr>"}).join("")+"</tbody>";}
+const CONF={site:["ok","Found on their site"],hunter:["ok","Hunter.io"],guessed:["warn","Guessed: check before sending"]};
 function contactLine(r){if(r.person||!(r.contact||r.to||r.phone))return "";
- return "<div style='margin-top:4px;font-size:13px'>"+(r.contact?esc(r.contact)+"<br>":"")+
-  (r.to?"<a href='mailto:"+esc(r.to)+"'>"+esc(r.to)+"</a><br>":"")+
+ const cf=r.to?(CONF[r.contact_source]||["ok","From your list"]):null;
+ return "<div style='margin-top:4px;font-size:13px'>"+(r.contact?esc(r.contact)+(r.contact_title?" <span class='muted'>("+esc(r.contact_title)+")</span>":"")+"<br>":"")+
+  (r.to?"<a href='mailto:"+esc(r.to)+"'>"+esc(r.to)+"</a> <span class='conf "+cf[0]+"' title='"+esc(r.contact_note||"")+"'>"+esc(cf[1])+"</span><br>":"")+
   (r.phone?"<a href='tel:"+esc(r.phone.replace(/[^\d+]/g,""))+"'>Call "+esc(r.phone)+"</a>":"")+"</div>";}
 function copyText(id,btn){navigator.clipboard.writeText($(id).innerText).then(()=>{btn.textContent="Copied";setTimeout(()=>btn.textContent="Copy",1500)})}
 
@@ -406,7 +420,9 @@ async function openProfile(){const {d:c}=await api("/config");CATS=c.categories|
  $("p_small").value=(c.smallbiz_words||[]).join(", ");$("p_subs").value=(c.subreddits||[]).join(", ");$("p_excl").value=(c.exclude_words||[]).join(", ");
  $("p_fl").value=(c.freelancer_queries||[]).join(", ");$("p_news").value=(c.news_queries||[]).join(", ");$("p_reddit").checked=!!c.use_reddit;
  $("p_bsky").checked=c.use_bluesky!==false;$("p_bskyq").value=(c.bsky_queries||[]).join(", ");
- NUMS.forEach(k=>$("p_"+k).value=c[k]??0);$("p_ntfy_topic").value=c.ntfy_topic||"";$("profErr").textContent="";profile.showModal();}
+ NUMS.forEach(k=>$("p_"+k).value=c[k]??0);$("p_ntfy_topic").value=c.ntfy_topic||"";
+ $("p_titles").value=(c.decision_titles||[]).join(", ");$("p_optout_line").value=c.optout_line||"";$("p_hunter_api_key").value="";
+ $("hunterState").textContent=c.hunter_key_set?"Key saved. The app has used "+(c.hunter_used||0)+" Hunter credits this month.":"No key saved yet.";$("hunterRm").style.display=c.hunter_key_set?"":"none";$("profErr").textContent="";profile.showModal();}
 async function saveProfile(){const b={proof_point:$("p_proof_point").value};PROF.forEach(([k])=>b[k]=$("p_"+k).value);
  b.categories={};Object.keys(CATS).forEach((k,i)=>b.categories[k]=split($("cat"+i).value));
  b.pain_signals={};Object.keys(PAIN).forEach((k,i)=>b.pain_signals[k]=split($("pain"+i).value));
@@ -414,8 +430,11 @@ async function saveProfile(){const b={proof_point:$("p_proof_point").value};PROF
  b.freelancer_queries=split($("p_fl").value);b.news_queries=split($("p_news").value);b.use_reddit=$("p_reddit").checked;
  b.use_bluesky=$("p_bsky").checked;b.bsky_queries=split($("p_bskyq").value);
  NUMS.forEach(k=>b[k]=$("p_"+k).value);b.ntfy_topic=$("p_ntfy_topic").value.trim();
+ b.decision_titles=split($("p_titles").value);b.optout_line=$("p_optout_line").value.trim();b.hunter_api_key=$("p_hunter_api_key").value.trim();
  const {ok,d}=await api("/config",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)});
  if(!ok){$("profErr").textContent=d.error||"Could not save.";return}profile.close();}
+async function removeHunter(){const {ok}=await api("/config",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({hunter_api_key:null})});
+ if(ok){$("hunterState").textContent="Key removed.";$("hunterRm").style.display="none"}}
 async function testAlert(btn){const topic=$("p_ntfy_topic").value.trim();
  const {ok,d}=await api("/test-alert",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({topic})});
  $("profErr").textContent=ok?"":(d.error||"Could not send.");if(ok){btn.textContent="Sent! Check your phone";setTimeout(()=>btn.textContent="Send test alert",3000)}}

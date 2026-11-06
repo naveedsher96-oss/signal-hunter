@@ -1,3 +1,4 @@
+import pytest
 import os
 
 import signal_hunter as sh
@@ -298,7 +299,7 @@ def test_list_scan_drafts_every_company_and_maps_phone(cfg, tmp_path, monkeypatc
     companies = sh.to_companies(rows, mapping)
     assert companies[0]["phone"] == "+1 (555) 010-2000"
     monkeypatch.setattr(sh, "find_contacts",
-                        lambda c: (["hello@quiet.co"], "", "quiet.co")
+                        lambda c, info=None, titles=None: (["hello@quiet.co"], "", "quiet.co")
                         if c["company"] == "Quiet Co" else ([], "", ""))
     by = {r["company"]["company"]: r for r in sh.run(companies, cfg)}
     quiet = by["Quiet Co"]
@@ -313,3 +314,124 @@ def test_discover_still_skips_cold_drafts(cfg, tmp_path):
     results = sh.discover(cfg)
     sh.write_outputs(cfg, results, "D", seen={}, out_dir=str(tmp_path), emails=False)
     assert all(not r.get("email") for r in results if r["tier"] == "COLD")
+
+
+# ------------------------------------------------- decision makers and emails --
+
+TEAM_PAGE = """<html><title>Bright Smiles Dental</title><a href="/our-team">Team</a>
+ <a href="mailto:info@brightsmiles.com">info</a></html>"""
+TEAM_SUB = """<html><h2>Meet our team</h2>
+ <div><h3>Jane Doe</h3><p>Founder &amp; Lead Dentist</p></div>
+ <div><h3>Tom Hill</h3><p>Office Manager</p></div>
+ <div><h3>Ann Lee</h3><p>Hygienist</p></div>
+ <p>Questions? Email tom.hill@brightsmiles.com</p></html>"""
+
+
+def lead(name, site="", tier="HOT"):
+    return {"company": {"company": name, "website": site}, "tier": tier, "score": 80,
+            "signals": [], "newest": ""}
+
+
+@pytest.fixture
+def team_site(monkeypatch):
+    import mocks
+    monkeypatch.setitem(mocks.R, "https://brightsmiles.com", TEAM_PAGE)
+    monkeypatch.setitem(mocks.R, "https://brightsmiles.com/our-team", TEAM_SUB)
+    monkeypatch.setitem(mocks.R, "dns.google/resolve?name=brightsmiles.com",
+                        {"Status": 0, "Answer": [{"type": 15, "data": "10 mx.brightsmiles.com."}]})
+    return mocks
+
+
+def test_people_on_page_pairs_names_with_titles():
+    people = sh.people_on_page(TEAM_SUB, sh.DEFAULT_DECISION_TITLES, "Bright Smiles Dental")
+    assert [(p["name"], p["title"]) for p in people] == [
+        ("Jane Doe", "Founder & Lead Dentist"), ("Tom Hill", "Office Manager")]
+    ld = ('<script type="application/ld+json">{"@graph":[{"@type":"Person",'
+          '"name":"Mark Ruiz","jobTitle":"Owner"}]}</script><p>Our Services</p>')
+    assert sh.people_on_page(ld, sh.DEFAULT_DECISION_TITLES)[0]["name"] == "Mark Ruiz"
+
+
+def test_email_pattern_is_learned_from_real_addresses():
+    people = [{"name": "Tom Hill"}]
+    assert sh.learn_pattern(["tom.hill@acme.com"], people, "acme.com") == "first.last"
+    assert sh.learn_pattern(["thill@acme.com"], people, "acme.com") == "flast"
+    assert sh.learn_pattern(["info@acme.com"], people, "acme.com") == ""
+    assert sh.email_for("José Álvarez", "flast", "acme.com") == "jalvarez@acme.com"
+
+
+def test_owner_email_is_guessed_from_the_pattern(cfg, team_site):
+    r = lead("Bright Smiles Dental", "https://brightsmiles.com")
+    sh.enrich_contacts([r], cfg)
+    c = r["company"]
+    assert (c["contact_name"], c["contact_title"]) == ("Jane Doe", "Founder & Lead Dentist")
+    assert c["contact_email"] == "jane.doe@brightsmiles.com"
+    assert c["contact_source"] == "guessed" and "first.last" in c["contact_note"]
+    assert sh.contact_confidence(c).startswith("Guessed")
+
+
+def test_no_guess_when_domain_takes_no_mail(cfg, team_site, monkeypatch):
+    monkeypatch.setitem(team_site.R, "dns.google/resolve?name=brightsmiles.com",
+                        {"Status": 3})
+    r = lead("Bright Smiles Dental", "https://brightsmiles.com")
+    sh.enrich_contacts([r], cfg)
+    assert r["company"]["contact_source"] == "site"   # published address, not a guess
+    assert r["company"]["contact_email"] == "tom.hill@brightsmiles.com"
+
+
+def test_hunter_used_once_per_domain_within_budget(cfg, team_site, monkeypatch):
+    calls = []
+    real = sh.http_get
+
+    def fake(url, as_json=True, headers=None):
+        if "api.hunter.io" in url:
+            calls.append((url, headers))
+            return {"data": {"email": "jane@brightsmiles.com", "score": 94,
+                             "position": "Founder", "verification": {"status": "valid"}}}
+        return real(url, as_json, headers)
+    monkeypatch.setattr(sh, "http_get", fake)
+    cfg.update(hunter_api_key="k" * 30, _hunter_left=1)
+    r = lead("Bright Smiles Dental", "https://brightsmiles.com")
+    sh.enrich_contacts([r], cfg)
+    c = r["company"]
+    assert c["contact_email"] == "jane@brightsmiles.com" and c["contact_source"] == "hunter"
+    assert "valid" in c["contact_note"] and cfg["_hunter_used"] == 1
+    assert "first_name=Jane" in calls[0][0] and calls[0][1] == {"X-API-KEY": "k" * 30}
+    # cached: a second scan costs nothing, and WARM leads never spend credits
+    again, warm = lead("Bright Smiles Dental", "https://brightsmiles.com"), \
+        lead("Bright Smiles Dental", "https://brightsmiles.com", tier="WARM")
+    sh.enrich_contacts([again], cfg)
+    sh.enrich_contacts([warm], cfg)
+    assert len(calls) == 1 and again["company"]["contact_email"] == "jane@brightsmiles.com"
+    assert warm["company"]["contact_source"] == "guessed"
+
+
+def test_hunter_not_called_without_budget_or_key(cfg, team_site, monkeypatch):
+    monkeypatch.setattr(sh, "http_get", lambda u, *a, **k: (
+        pytest.fail("Hunter called") if "hunter" in u else team_site.http_get(u, *a, **k)))
+    sh.enrich_contacts([lead("Bright Smiles Dental", "https://brightsmiles.com")],
+                       dict(cfg, hunter_api_key="k" * 30, _hunter_left=0))
+    sh.enrich_contacts([lead("Bright Smiles Dental", "https://brightsmiles.com")], cfg)
+
+
+def test_excel_has_title_and_confidence(cfg, team_site, tmp_path):
+    from openpyxl import load_workbook
+    r = lead("Bright Smiles Dental", "https://brightsmiles.com")
+    r.update(track="x", needs=[], remote_evidence="", intent_count=0, sources="")
+    sh.enrich_contacts([r], cfg)
+    path, _ = sh.write_outputs(cfg, [r], "T", seen={}, out_dir=str(tmp_path), emails=False)
+    ws = load_workbook(path)["Leads"]
+    col = {c.value: i for i, c in enumerate(ws[1])}
+    row = list(ws.iter_rows(min_row=2, values_only=True))[0]
+    assert row[col["Contact title"]] == "Founder & Lead Dentist"
+    assert row[col["Email confidence"]].startswith("Guessed")
+
+
+def test_cold_emails_carry_an_opt_out_line(cfg):
+    r = lead("Bright Smiles Dental")
+    r.update(track="Pitch", needs=["CRM Automation"], segment="", top_role="")
+    _, body = sh.build_email(cfg, r["company"], r)
+    assert body.rstrip().endswith(cfg["optout_line"])
+    r["email"] = {"subject": "x", "body": body}
+    assert cfg["optout_line"] in sh.build_followup(cfg, r["company"], r)[1]
+    assert cfg["optout_line"] not in sh.build_email(dict(cfg, optout_line=""),
+                                                     r["company"], r)[1]
